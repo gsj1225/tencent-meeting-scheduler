@@ -1,0 +1,22 @@
+[Unit]
+Description=Tencent Meeting Schedule Tool
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=schedule
+Group=schedule
+WorkingDirectory=/opt/schedule
+EnvironmentFile=/etc/schedule.env
+ExecStart=/opt/schedule/venv/bin/python /opt/schedule/server.py
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/schedule
+
+[Install]
+WantedBy=multi-user.target

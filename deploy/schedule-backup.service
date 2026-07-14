@@ -1,0 +1,10 @@
+[Unit]
+Description=Back up schedule database
+
+[Service]
+Type=oneshot
+User=schedule
+Group=schedule
+WorkingDirectory=/opt/schedule
+EnvironmentFile=/etc/schedule.env
+ExecStart=/opt/schedule/venv/bin/python /opt/schedule/backup.py

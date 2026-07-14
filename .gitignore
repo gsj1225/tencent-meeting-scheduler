@@ -1,0 +1,35 @@
+# Local data and backups
+*.db
+*.db-wal
+*.db-shm
+backups/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Test/debug artifacts
+.rundata/
+output/
+page_elements_*.txt
+debug_*.py
+debug_*.png
+
+# Packaging output
+build/
+dist/
+*.spec
+便携版构建/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

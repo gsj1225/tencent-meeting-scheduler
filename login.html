@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>登录 - 腾讯会议排课调度工具</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f3f6fb;font-family:system-ui,"Microsoft YaHei",sans-serif;color:#1f2937}.card{width:min(92vw,390px);background:#fff;padding:34px;border-radius:16px;box-shadow:0 14px 40px rgba(31,41,55,.12)}h1{font-size:22px;margin:0 0 8px}p{color:#6b7280;margin:0 0 24px}label{display:block;font-size:14px;margin-bottom:8px}input{width:100%;padding:12px 14px;border:1px solid #d1d5db;border-radius:9px;font-size:16px;outline:none}input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}button{width:100%;margin-top:18px;padding:12px;border:0;border-radius:9px;background:#2563eb;color:#fff;font-size:16px;cursor:pointer}button:disabled{opacity:.65}.error{min-height:20px;margin-top:14px;color:#dc2626;font-size:14px}.remember-row{display:flex;align-items:center;gap:6px;margin-top:12px;font-size:13px;color:#6b7280;cursor:pointer;user-select:none}.remember-row input{width:auto;padding:0}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>腾讯会议排课调度工具</h1>
+    <p>请输入团队访问密码</p>
+    <form id="login-form">
+      <label for="password">访问密码</label>
+      <input id="password" type="password" autocomplete="current-password" required autofocus>
+      <label class="remember-row"><input type="checkbox" id="remember">记住密码</label>
+      <button id="submit" type="submit">登录</button>
+      <div id="error" class="error" role="alert"></div>
+    </form>
+  </main>
+  <script>
+    (function() {
+      var saved = localStorage.getItem('saved_password');
+      if (saved) {
+        document.getElementById('password').value = saved;
+        document.getElementById('remember').checked = true;
+      }
+    })();
+    document.getElementById('login-form').addEventListener('submit', async function(event) {
+      event.preventDefault();
+      const button = document.getElementById('submit');
+      const error = document.getElementById('error');
+      button.disabled = true; error.textContent = '';
+      const pwd = document.getElementById('password').value;
+      const remember = document.getElementById('remember').checked;
+      try {
+        const response = await fetch('/api/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pwd})});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || '登录失败');
+        if (remember) {
+          localStorage.setItem('saved_password', pwd);
+        } else {
+          localStorage.removeItem('saved_password');
+        }
+        location.replace('/');
+      } catch (err) { error.textContent = err.message; button.disabled = false; }
+    });
+  </script>
+</body>
+</html>

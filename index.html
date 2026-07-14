@@ -1,0 +1,1985 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>腾讯会议排课调度工具</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/favicon.png">
+<style>
+  :root {
+    --primary: #4f6ef7;
+    --primary-hover: #3b57d9;
+    --primary-light: #e8ecfe;
+    --danger: #e74c3c;
+    --danger-hover: #c0392b;
+    --success: #27ae60;
+    --success-light: #e8f8ef;
+    --warning: #f39c12;
+    --warning-light: #fef9e7;
+    --bg: #f5f6fa;
+    --card: #ffffff;
+    --text: #2c3e50;
+    --text-light: #7f8c8d;
+    --border: #dcdfe6;
+    --radius: 8px;
+    --shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* Header */
+  .header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  }
+  .header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .header-actions { display: flex; gap: 8px; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+  .btn:active { transform: translateY(0); }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-hover); }
+  .btn-outline { background: #fff; color: var(--text); border: 1px solid var(--border); }
+  .btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: var(--danger-hover); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn-success { background: var(--success); color: #fff; }
+  .btn-success:hover { background: #219a52; }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 0;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    overflow-x: auto;
+  }
+  .tab {
+    padding: 12px 20px;
+    font-size: 14px;
+    color: var(--text-light);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .tab:hover { color: var(--primary); }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+
+  /* Main Content */
+  .main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Card */
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .card-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Form */
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-light);
+  }
+  .form-group input, .form-group select, .form-group textarea {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 14px;
+    color: var(--text);
+    transition: border-color 0.2s;
+    outline: none;
+    font-family: inherit;
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-light);
+  }
+  .form-group input::placeholder { color: #bbb; }
+  .form-group textarea { resize: vertical; min-height: 80px; }
+  .form-actions { margin-top: 16px; display: flex; gap: 8px; }
+
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: var(--card);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+    width: 90%;
+    max-width: 560px;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 24px;
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .modal-header h2 { font-size: 18px; font-weight: 600; }
+  .modal-close {
+    width: 32px; height: 32px;
+    border: none;
+    background: var(--bg);
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 18px;
+    color: var(--text-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .modal-close:hover { background: #eee; color: var(--text); }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { background: var(--bg); padding: 10px 12px; text-align: left; font-weight: 600; font-size: 13px; color: var(--text-light); border-bottom: 2px solid var(--border); white-space: nowrap; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: #f8f9fb; }
+
+  /* Badge */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .badge-success { background: var(--success-light); color: var(--success); }
+  .badge-warning { background: var(--warning-light); color: var(--warning); }
+  .badge-primary { background: var(--primary-light); color: var(--primary); }
+
+  /* Stats */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .stat-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px;
+    text-align: center;
+  }
+  .stat-value { font-size: 28px; font-weight: 700; color: var(--primary); }
+  .stat-label { font-size: 13px; color: var(--text-light); margin-top: 4px; }
+
+  /* Timeline */
+  .timeline-container { overflow-x: auto; }
+  .timeline { min-width: 900px; }
+  .timeline-row {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    border-bottom: 1px solid #fff;
+    min-height: 50px;
+  }
+  .timeline-row:last-child { border-bottom: none; }
+  .timeline-row:nth-child(even) .timeline-slots { background: #f5f5f5; }
+  .timeline-row:nth-child(odd) .timeline-slots { background: #fafafa; }
+  .timeline-label {
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    border-right: 1px solid var(--border);
+    background: #fafbfc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .timeline-slots {
+    display: flex;
+    position: relative;
+  }
+  .timeline-slot {
+    flex: 1;
+    border-right: 1px solid #e0e0e0;
+    min-height: 50px;
+  }
+  .timeline-slot:nth-child(4n) { border-right-color: var(--border); }
+  .timeline-block {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    border: none;
+    border-radius: 0;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 500;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    color: #fff;
+    cursor: pointer;
+    z-index: 1;
+    line-height: 1.3;
+  }
+  .timeline-block .block-time {
+    font-size: 10px;
+    opacity: 0.85;
+    font-weight: 400;
+  }
+  .timeline-block .block-name {
+    font-weight: 600;
+  }
+  .timeline-block:hover { background: #d0d8fc; }
+  .timeline-hours {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    border-bottom: 1px solid var(--border);
+  }
+  .timeline-hours-label { background: #fafbfc; }
+  .timeline-hour-slots { display: flex; }
+  .timeline-hour-label {
+    flex: 1;
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-light);
+    padding: 4px 0;
+    border-right: 1px solid #eee;
+  }
+  .timeline-hour-label:nth-child(4n) { border-right-color: var(--border); }
+
+  /* Account list */
+  .account-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .account-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg);
+    border-radius: 20px;
+    font-size: 13px;
+  }
+  .account-tag .remove {
+    width: 18px; height: 18px;
+    border: none;
+    background: #ddd;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 12px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .account-tag .remove:hover { background: var(--danger); color: #fff; }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-light);
+  }
+  .empty-state p { font-size: 14px; margin-top: 8px; }
+  .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+
+  /* Toast */
+  .toast-container { position: fixed; top: 80px; right: 24px; z-index: 300; display: flex; flex-direction: column; gap: 8px; }
+  .toast {
+    padding: 12px 20px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    animation: slideIn 0.3s ease;
+    max-width: 360px;
+  }
+  .toast-success { background: var(--success); color: #fff; }
+  .toast-error { background: var(--danger); color: #fff; }
+  .toast-info { background: var(--primary); color: #fff; }
+  @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+  /* Filter bar */
+  .filter-bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .filter-bar input, .filter-bar select {
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    outline: none;
+  }
+  .filter-bar input:focus, .filter-bar select:focus { border-color: var(--primary); }
+
+  /* Account picker */
+  .account-picker {
+    max-height: 240px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-top: 8px;
+  }
+  .account-option {
+    padding: 8px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background 0.15s;
+  }
+  .account-option:last-child { border-bottom: none; }
+  .account-option:hover { background: var(--primary-light); }
+  .account-option.busy { opacity: 0.5; }
+  .account-option.selected { background: var(--primary); color: #fff; }
+  .account-option .course-count {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text-light);
+  }
+  .account-option.selected .course-count { background: rgba(255,255,255,0.2); color: #fff; }
+  .account-option .status-free { color: var(--success); font-weight: 500; }
+  .account-option .status-busy { color: var(--danger); font-weight: 500; }
+  .account-option.selected .status-free,
+  .account-option.selected .status-busy { color: #fff; }
+
+  /* Confirm dialog */
+  /* Paste area */
+  .paste-area {
+    margin-bottom: 20px;
+    padding: 16px;
+    background: var(--primary-light);
+    border: 1px dashed var(--primary);
+    border-radius: var(--radius);
+  }
+  .paste-area .paste-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--primary);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .paste-area textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    height: 260px;
+    outline: none;
+    margin-bottom: 8px;
+  }
+  .paste-area textarea:focus {
+    border-color: var(--primary);
+  }
+  .paste-result {
+    font-size: 13px;
+    color: var(--success);
+    margin-top: 6px;
+    display: none;
+  }
+  .paste-result.active { display: block; }
+  .confirm-dialog { text-align: center; }
+  .confirm-dialog p { margin-bottom: 20px; font-size: 15px; line-height: 1.6; }
+  .confirm-dialog .actions { display: flex; gap: 12px; justify-content: center; }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .main { padding: 16px; }
+    .form-grid { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .header { padding: 12px 16px; }
+    .header h1 { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1>腾讯会议排课调度工具</h1>
+  <div class="header-actions">
+    <button class="btn btn-outline" onclick="syncTencentData()" id="syncBtn">同步腾讯会议</button>
+    <button class="btn btn-outline" onclick="importData()">导入数据</button>
+    <button class="btn btn-outline" onclick="exportData()">导出数据</button>
+  </div>
+  <input type="file" id="importFile" accept=".json" style="display:none" onchange="handleImport(event)">
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <div class="tab active" data-page="schedule">排课</div>
+  <div class="tab" data-page="overview">日期总览</div>
+  <div class="tab" data-page="accounts">账号管理</div>
+  <div class="tab" data-page="records">排课记录</div>
+  <div class="tab" data-page="stats">数据统计</div>
+  <div class="tab" data-page="capacity">录制容量</div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Main Content -->
+<div class="main">
+
+  <!-- Page: Schedule -->
+  <div class="page active" id="page-schedule">
+    <div class="card">
+      <div class="card-title">排课 - 查找空闲账号</div>
+      <div class="paste-area">
+        <div class="paste-title">&#128221; 粘贴消息，智能识别并处理</div>
+        <textarea id="pasteText" placeholder="支持两种消息类型：&#10;&#10;1. 腾讯会议通知 → 自动录入排课记录&#10;   示例：Class 5 教室 邀请您参加腾讯会议&#10;         会议主题：平翀 选课指导&#10;         会议时间：2026/07/14 17:35-18:50 ...&#10;&#10;2. 自然语言消息 → 填入表单并查找空闲教室&#10;   示例：周生翔选课指导 12号下午5点&#10;   示例：张三数学 15号14:00-15:30&#10;   示例：李四 周六上午10点 英语课"></textarea>
+        <button class="btn btn-primary btn-sm" onclick="smartPaste()">智能识别</button>
+        <button class="btn btn-outline btn-sm" onclick="clearPasteArea()">清空</button>
+        <div class="paste-result" id="parseResult"></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>日期</label>
+          <input type="date" id="schedDate" onchange="findFreeAccounts()">
+        </div>
+        <div class="form-group">
+          <label>开始时间</label>
+          <input type="time" id="schedStart" step="900" value="14:00" onchange="findFreeAccounts()">
+        </div>
+        <div class="form-group">
+          <label>结束时间</label>
+          <input type="time" id="schedEnd" step="900" value="15:00" onchange="findFreeAccounts()">
+        </div>
+        <div class="form-group">
+          <label>会议主题 *</label>
+          <input type="text" id="schedStudent" placeholder="输入会议主题">
+        </div>
+        <div class="form-group">
+          <label>会议号</label>
+          <input type="text" id="schedMeetingId" placeholder="选填">
+        </div>
+      </div>
+      <div id="accountPickerWrap" style="margin-top:12px; display:none;">
+        <label style="font-size:13px; font-weight:500; color:var(--text-light);">选择教室（绿色为空闲，红色为忙碌）</label>
+        <div class="account-picker" id="accountPicker"></div>
+        <div id="selectedAccountInfo" style="margin-top:8px; font-size:13px; color:var(--text-light);"></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="confirmSchedule()">确认排课</button>
+        <button class="btn btn-outline" onclick="clearScheduleForm()">清空</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">查询回放 / 取消会议</div>
+      <div class="filter-bar">
+        <input type="text" id="playbackMeetingCode" placeholder="输入会议号" style="max-width:200px;">
+        <button class="btn btn-primary btn-sm" onclick="queryPlayback()">查询回放</button>
+        <button class="btn btn-danger btn-sm" onclick="cancelMeeting()">取消会议</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Page: Overview -->
+  <div class="page" id="page-overview">
+    <div class="card">
+      <div class="card-title">日期总览</div>
+      <div class="filter-bar">
+        <input type="date" id="overviewDate" onchange="renderTimeline()">
+        <label style="font-size:13px; color:var(--text-light); display:flex; align-items:center; gap:4px;">
+          <input type="checkbox" id="overviewShowWeekend" onchange="renderTimeline()"> 显示周末
+        </label>
+      </div>
+      <div id="timelineWrap"></div>
+    </div>
+  </div>
+
+  <!-- Page: Accounts -->
+  <div class="page" id="page-accounts">
+    <div class="card">
+      <div class="card-title">账号管理 (<span id="accountCount">0</span>个)</div>
+      <div id="accountListArea">
+        <div class="account-list" id="accountList"></div>
+      </div>
+      <div style="margin-top:16px;">
+        <div class="card-title" style="border-bottom:none; margin-bottom:12px;">批量导入账号</div>
+        <div class="form-group">
+          <label>每行一个账号，粘贴后导入</label>
+          <textarea id="importAccounts" placeholder="account1&#10;account2&#10;account3"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="batchImportAccounts()">导入账号</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Page: Records -->
+  <div class="page" id="page-records">
+    <div class="card">
+      <div class="card-title">排课记录</div>
+      <div class="filter-bar">
+        <input type="date" id="filterDate" placeholder="按日期筛选" onchange="renderRecords()">
+        <input type="text" id="filterStudent" placeholder="按学生搜索" oninput="renderRecords()">
+        <input type="text" id="filterAccount" placeholder="按账号搜索" oninput="renderRecords()">
+        <select id="filterAccountSelect" onchange="setFilterAccount(this.value)" style="max-width:200px;">
+          <option value="">所有账号</option>
+        </select>
+        <button class="btn btn-outline btn-sm" onclick="clearFilters()">清除筛选</button>
+      </div>
+      <div class="table-wrap" id="recordsTableWrap"></div>
+    </div>
+  </div>
+
+  <!-- Page: Stats -->
+  <div class="page" id="page-stats">
+    <div class="stats-grid" id="statsGrid"></div>
+    <div class="card">
+      <div class="card-title">账号利用率排行</div>
+      <div class="table-wrap" id="accountStatsTable"></div>
+    </div>
+  </div>
+
+  <div class="page" id="page-capacity">
+    <div class="card">
+      <div class="card-title">教师录制容量</div>
+      <div style="background:var(--primary-light); border-radius:var(--radius); padding:10px 14px; margin-bottom:12px; font-size:12px; line-height:1.7; color:var(--text-light);">
+        此处统计的是近 180 天内各账号的云录制文件大小累加值，仅供参考。云录制存储空间满后将无法继续生成新的录制回放，请定期清理旧录制。准确的存储配额与已用空间请以 <a href="https://meeting.tencent.com" target="_blank" style="color:var(--primary);">腾讯会议管理后台</a>「录制管理」页面为准。
+      </div>
+      <div class="filter-bar">
+        <button class="btn btn-primary btn-sm" onclick="loadRecordingCapacity()">刷新数据</button>
+        <span id="capacitySummary" style="font-size:13px; color:var(--text-light);"></span>
+      </div>
+      <div id="capacityLoading" style="text-align:center; padding:40px; color:var(--text-light); display:none;">正在查询，请稍候...</div>
+      <div class="table-wrap" id="capacityTable"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Modal: Edit Schedule -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="editModalTitle">编辑排课</h2>
+      <button class="modal-close" onclick="closeEditModal()">&times;</button>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>日期</label>
+        <input type="date" id="editDate">
+      </div>
+      <div class="form-group">
+        <label>开始时间</label>
+        <input type="time" id="editStart" step="900">
+      </div>
+      <div class="form-group">
+        <label>结束时间</label>
+        <input type="time" id="editEnd" step="900">
+      </div>
+      <div class="form-group">
+        <label>账号</label>
+        <input type="text" id="editAccount">
+      </div>
+      <div class="form-group">
+        <label>学生姓名</label>
+        <input type="text" id="editStudent">
+      </div>
+      <div class="form-group">
+        <label>课程名称</label>
+        <input type="time" id="editCourse" style="display:none">
+        <input type="text" id="editCourseText">
+      </div>
+      <div class="form-group">
+        <label>会议号</label>
+        <input type="text" id="editMeetingId">
+      </div>
+    </div>
+    <div class="form-actions" style="margin-top:16px;">
+      <button class="btn btn-primary" onclick="saveEdit()">保存修改</button>
+      <button class="btn btn-danger" onclick="deleteFromEdit()">删除排课</button>
+      <button class="btn btn-outline" onclick="closeEditModal()">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Confirm -->
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal" style="max-width:400px;">
+    <div class="confirm-dialog">
+      <p id="confirmMessage"></p>
+      <div class="actions">
+        <button class="btn btn-danger" id="confirmYes">确认</button>
+        <button class="btn btn-outline" onclick="closeConfirm()">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Playback -->
+<div class="modal-overlay" id="playbackModal">
+  <div class="modal" style="max-width:520px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h2 style="margin:0;">回放信息</h2>
+      <button class="modal-close" onclick="closePlayback()">&times;</button>
+    </div>
+    <textarea id="playbackText" readonly style="width:100%;min-height:120px;font-size:14px;font-family:inherit;padding:12px;border:1px solid var(--border);border-radius:var(--radius);resize:vertical;line-height:1.6;"></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+      <button class="btn btn-primary" onclick="copyPlayback()">复制回放信息</button>
+      <button class="btn btn-outline" onclick="closePlayback()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Invitation -->
+<div class="modal-overlay" id="invitationModal">
+  <div class="modal" style="max-width:520px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h2 style="margin:0;">会议邀请信息</h2>
+      <button class="modal-close" onclick="closeInvitation()">&times;</button>
+    </div>
+    <textarea id="invitationText" readonly style="width:100%;min-height:180px;font-size:14px;font-family:inherit;padding:12px;border:1px solid var(--border);border-radius:var(--radius);resize:vertical;line-height:1.6;"></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+      <button class="btn btn-primary" onclick="copyInvitation()">复制邀请信息</button>
+      <button class="btn btn-outline" onclick="closeInvitation()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ========== Data Layer ==========
+
+async function loadData() {
+  try {
+    const resp = await fetch('/api/data');
+    if (resp.status === 401) { location.replace('/login'); return null; }
+    if (resp.ok) return await resp.json();
+  } catch(e) {
+    console.error('Data load error:', e);
+  }
+  return { accounts: [], schedules: [] };
+}
+
+function genId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 6);
+}
+
+async function apiPost(url, body) {
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (resp.status === 401) { location.replace('/login'); throw new Error('登录已失效'); }
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '请求失败');
+    return data;
+  } catch(e) {
+    if (e.message === 'Failed to fetch') throw new Error('无法连接到服务器，请确认服务已启动');
+    throw e;
+  }
+}
+
+async function apiPut(url, body) {
+  try {
+    const resp = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (resp.status === 401) { location.replace('/login'); throw new Error('登录已失效'); }
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '请求失败');
+    return data;
+  } catch(e) {
+    if (e.message === 'Failed to fetch') throw new Error('无法连接到服务器，请确认服务已启动');
+    throw e;
+  }
+}
+
+// ========== Time Utils ==========
+function timeToMinutes(t) {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function minutesToTime(m) {
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+}
+
+function isOverlap(s1, e1, s2, e2) {
+  const a1 = timeToMinutes(s1), a2 = timeToMinutes(e1);
+  const b1 = timeToMinutes(s2), b2 = timeToMinutes(e2);
+  return a1 < b2 && b1 < a2;
+}
+
+function formatDate(d) {
+  const [y, m, day] = d.split('-').map(Number);
+  const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+  return `${m}月${day}日 周${weekdays[new Date(y, m-1, day).getDay()]}`;
+}
+
+// ========== Toast ==========
+function showToast(msg, type) {
+  type = type || 'info';
+  const c = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(function() { el.remove(); }, 3000);
+}
+
+// ========== Tabs ==========
+document.querySelectorAll('.tab').forEach(function(tab) {
+  tab.addEventListener('click', function() {
+    document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
+    tab.classList.add('active');
+    document.getElementById('page-' + tab.dataset.page).classList.add('active');
+    if (tab.dataset.page === 'overview') renderTimeline();
+    if (tab.dataset.page === 'accounts') renderAccounts();
+    if (tab.dataset.page === 'records') renderRecords();
+    if (tab.dataset.page === 'stats') renderStats();
+  });
+});
+
+// ========== Schedule Page ==========
+let selectedAccount = null;
+
+function setDefaultDate() {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  document.getElementById('schedDate').value = yyyy + '-' + mm + '-' + dd;
+  document.getElementById('overviewDate').value = yyyy + '-' + mm + '-' + dd;
+  // 默认开始时间设为当前时间最近的整点（超过30分则取下一个小时）
+  var now = new Date();
+  var hour = now.getHours();
+  if (now.getMinutes() > 0) hour += 1;
+  if (hour >= 24) hour = 23;
+  var defaultStart = String(hour).padStart(2, '0') + ':00';
+  var endHour = hour + 1;
+  if (endHour >= 24) endHour = 23;
+  var defaultEnd = String(endHour).padStart(2, '0') + ':00';
+  document.getElementById('schedStart').value = defaultStart;
+  document.getElementById('schedEnd').value = defaultEnd;
+}
+
+async function findFreeAccounts() {
+  const date = document.getElementById('schedDate').value;
+  const startTime = document.getElementById('schedStart').value;
+  const endTime = document.getElementById('schedEnd').value;
+
+  if (!date || !startTime || !endTime) return;
+  if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+    showToast('结束时间必须大于开始时间', 'error');
+    return;
+  }
+
+  // 排课前先从腾讯会议同步最新数据（等待同步完成后再加载教室列表）
+  showToast('正在同步最新会议数据...', 'info');
+  try {
+    var syncResp = await apiPost('/api/tencent/sync', {});
+    if (syncResp.new_meetings > 0) {
+      showToast('已同步 ' + syncResp.new_meetings + ' 条新会议', 'success');
+    } else {
+      showToast('同步完成', 'success');
+    }
+  } catch(e) {
+    showToast('同步失败：' + e.message + '；已使用本地数据', 'error');
+  }
+
+  const data = await loadData();
+  if (data.accounts.length === 0) {
+    showToast('请先在"账号管理"中导入账号', 'error');
+    return;
+  }
+
+  // 获取当天该时间段的排课（开始时间提前15分钟检测冲突）
+  const daySchedules = data.schedules.filter(function(s) { return s.date === date; });
+  const startAdjusted = minutesToTime(timeToMinutes(startTime) - 15);
+
+  const wrap = document.getElementById('accountPickerWrap');
+  const picker = document.getElementById('accountPicker');
+  wrap.style.display = 'block';
+  picker.innerHTML = '';
+
+  data.accounts.forEach(function(account, index) {
+    var opt = document.createElement('div');
+    opt.className = 'account-option';
+
+    // 检测该账号在选定时间段是否有冲突
+    var conflictSched = daySchedules.find(function(s) {
+      return s.account === account && isOverlap(startAdjusted, endTime, s.startTime, s.endTime);
+    });
+
+    var statusText, statusClass;
+    if (conflictSched) {
+      statusText = '忙碌 ' + conflictSched.startTime + '-' + conflictSched.endTime;
+      statusClass = 'status-busy';
+      opt.classList.add('busy');
+    } else {
+      statusText = '空闲';
+      statusClass = 'status-free';
+    }
+
+    opt.innerHTML = '<span>' + (index + 1) + '. ' + account + '</span><span class="' + statusClass + '" style="font-size:12px;">' + statusText + '</span>';
+    opt.addEventListener('click', function() {
+      picker.querySelectorAll('.account-option').forEach(function(o) { o.classList.remove('selected'); });
+      opt.classList.add('selected');
+      selectedAccount = account;
+      document.getElementById('selectedAccountInfo').textContent = '已选择: ' + account;
+    });
+    picker.appendChild(opt);
+  });
+}
+
+async function confirmSchedule() {
+  var date = document.getElementById('schedDate').value;
+  var startTime = document.getElementById('schedStart').value;
+  var endTime = document.getElementById('schedEnd').value;
+  var student = document.getElementById('schedStudent').value.trim();
+  var course = '';
+  var meetingId = document.getElementById('schedMeetingId').value.trim();
+
+  if (!date) { showToast('请选择日期', 'error'); return; }
+  if (!startTime || !endTime) { showToast('请填写起止时间', 'error'); return; }
+  if (timeToMinutes(endTime) <= timeToMinutes(startTime)) { showToast('结束时间必须大于开始时间', 'error'); return; }
+  if (!student) { showToast('请填写学生姓名', 'error'); return; }
+  if (!selectedAccount) {
+    showToast('请先选择教室', 'error');
+    await findFreeAccounts();
+    return;
+  }
+
+  try {
+    var needCreateMeeting = !meetingId;
+    if (needCreateMeeting) {
+      var subject = student;
+      var confirmed = confirm('是否同时在腾讯会议中创建会议？\n\n主题: ' + subject + '\n账号: ' + selectedAccount + '\n时间: ' + date + ' ' + startTime + '-' + endTime);
+      if (!confirmed) {
+        return;
+      }
+    }
+    var resp = await apiPost('/api/schedule/add', {
+      account: selectedAccount, date: date, startTime: startTime, endTime: endTime,
+      student: student, course: course, meetingId: meetingId, autoCreateMeeting: needCreateMeeting
+    });
+    var meetingInfo = resp.meetingId ? ' 会议号:' + resp.meetingId : '';
+    showToast('排课成功! ' + student + ' - ' + date + ' ' + startTime + '-' + endTime + ' [' + selectedAccount + ']' + meetingInfo, 'success');
+    // 如果有邀请文本，弹窗显示供复制
+    if (resp.invitation) {
+      showInvitation(resp.invitation);
+    }
+    document.getElementById('schedStudent').value = '';
+    document.getElementById('schedMeetingId').value = '';
+    selectedAccount = null;
+    document.getElementById('selectedAccountInfo').textContent = '';
+    document.getElementById('accountPickerWrap').style.display = 'none';
+  } catch(e) {
+    showToast(e.message, 'error');
+  }
+}
+
+function clearScheduleForm() {
+  document.getElementById('schedStudent').value = '';
+  document.getElementById('schedMeetingId').value = '';
+  selectedAccount = null;
+  document.getElementById('selectedAccountInfo').textContent = '';
+  document.getElementById('accountPickerWrap').style.display = 'none';
+}
+
+// ========== Quick Add from Meeting Notice ==========
+async function quickAddSchedule() {
+  var text = document.getElementById('pasteText').value.trim();
+  if (!text) { showToast('请粘贴会议通知内容', 'error'); return; }
+
+  var resultEl = document.getElementById('parseResult');
+  var parsed = { date: null, startTime: null, endTime: null, student: null, course: null, meetingId: null, account: null };
+
+  var roomMatch = text.match(/^(.+?)\s+(?:教室|邀请您参加)/);
+  if (roomMatch) {
+    parsed.account = roomMatch[1].trim();
+  }
+
+  var meetingMatch = text.match(/#腾讯会议[：:]\s*([\d\-\s]+)/);
+  if (meetingMatch) {
+    parsed.meetingId = meetingMatch[1].replace(/\s/g, '');
+  }
+  if (!parsed.meetingId) {
+    var meetingMatch2 = text.match(/腾讯会议[：:]\s*([\d\-\s]+)/);
+    if (meetingMatch2) {
+      parsed.meetingId = meetingMatch2[1].replace(/\s/g, '');
+    }
+  }
+
+  var timeMatch = text.match(/会议时间[：:]\s*(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})\s+(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})/);
+  if (timeMatch) {
+    var year = timeMatch[1];
+    var month = timeMatch[2].padStart(2, '0');
+    var day = timeMatch[3].padStart(2, '0');
+    parsed.date = year + '-' + month + '-' + day;
+    parsed.startTime = timeMatch[4].padStart(2, '0') + ':' + timeMatch[5];
+    parsed.endTime = timeMatch[6].padStart(2, '0') + ':' + timeMatch[7];
+  }
+
+  var topicMatch = text.match(/会议主题[：:]\s*(.+)/);
+  if (topicMatch) {
+    var topic = topicMatch[1].trim();
+    var parts = topic.split(/\s+/).filter(function(p) { return p.length > 0; });
+    if (parts.length >= 2) {
+      parsed.student = parts[0];
+      parsed.course = parts.slice(1).join(' ');
+    } else if (parts.length === 1) {
+      parsed.student = parts[0];
+      parsed.course = '';
+    }
+  }
+
+  if (!parsed.date || !parsed.startTime || !parsed.endTime || !parsed.student) {
+    resultEl.textContent = '解析失败：缺少必要信息（日期、时间、学生姓名）';
+    resultEl.className = 'paste-result active';
+    resultEl.style.color = 'var(--danger)';
+    showToast('信息不完整，无法自动录入', 'error');
+    return;
+  }
+
+  try {
+    await apiPost('/api/schedule/add', {
+      account: parsed.account || '未指定',
+      date: parsed.date,
+      startTime: parsed.startTime,
+      endTime: parsed.endTime,
+      student: parsed.student,
+      course: parsed.course || '',
+      meetingId: parsed.meetingId || ''
+    });
+    var summary = parsed.student + ' | ' + parsed.date + ' ' + parsed.startTime + '-' + parsed.endTime + ' | ' + (parsed.account || '-') + ' | ' + (parsed.meetingId || '-');
+    resultEl.textContent = '已录入: ' + summary;
+    resultEl.className = 'paste-result active';
+    resultEl.style.color = 'var(--success)';
+    showToast('排课已自动录入: ' + parsed.student + ' - ' + parsed.date + ' ' + parsed.startTime + '-' + parsed.endTime, 'success');
+    document.getElementById('pasteText').value = '';
+    setTimeout(function() {
+      resultEl.className = 'paste-result';
+      resultEl.textContent = '';
+    }, 3000);
+  } catch(e) {
+    if (e.message && e.message.indexOf('冲突') !== -1) {
+      resultEl.textContent = '冲突：' + parsed.account + ' 在 ' + parsed.date + ' ' + parsed.startTime + '-' + parsed.endTime + ' 已有排课';
+      resultEl.className = 'paste-result active';
+      resultEl.style.color = 'var(--danger)';
+    }
+    showToast(e.message, 'error');
+  }
+}
+
+function clearPasteArea() {
+  document.getElementById('pasteText').value = '';
+  document.getElementById('parseResult').className = 'paste-result';
+  document.getElementById('parseResult').textContent = '';
+}
+
+// ========== Smart Paste ==========
+async function smartPaste() {
+  var text = document.getElementById('pasteText').value.trim();
+  if (!text) { showToast('请粘贴消息内容', 'error'); return; }
+
+  // Detect if it's a Tencent Meeting notice
+  var isMeetingNotice = /腾讯会议/.test(text) && /会议时间[：:]/.test(text);
+
+  if (isMeetingNotice) {
+    await quickAddSchedule();
+    return;
+  }
+
+  // Otherwise, treat as natural language message → parse and fill form
+  var resultEl = document.getElementById('parseResult');
+  var parsed = parseNaturalLanguage(text);
+
+  // Fill form
+  var filled = [];
+  if (parsed.date) { document.getElementById('schedDate').value = parsed.date; filled.push('日期(' + parsed.date + ')'); }
+  if (parsed.startTime) { document.getElementById('schedStart').value = parsed.startTime; filled.push('开始(' + parsed.startTime + ')'); }
+  if (parsed.endTime) { document.getElementById('schedEnd').value = parsed.endTime; filled.push('结束(' + parsed.endTime + ')'); }
+  if (parsed.student) { document.getElementById('schedStudent').value = parsed.student; filled.push('学生(' + parsed.student + ')'); }
+  if (parsed.student && parsed.course) {
+    document.getElementById('schedStudent').value = parsed.student + ' ' + parsed.course;
+  } else if (parsed.student) {
+    document.getElementById('schedStudent').value = parsed.student;
+  }
+
+  if (filled.length === 0) {
+    resultEl.textContent = '未能识别有效信息，请检查内容';
+    resultEl.className = 'paste-result active';
+    resultEl.style.color = 'var(--danger)';
+    showToast('识别失败', 'error');
+    return;
+  }
+
+  var msg = '已识别: ' + filled.join('、');
+  if (!parsed.endTime && parsed.startTime) msg += ' (结束时间未识别，请手动补充)';
+  resultEl.textContent = msg;
+  resultEl.className = 'paste-result active';
+  resultEl.style.color = 'var(--success)';
+  showToast('已填入表单', 'success');
+
+  // Auto-search free accounts if date and time are filled
+  if (parsed.date && parsed.startTime) {
+    await findFreeAccounts();
+  }
+}
+
+function parseNaturalLanguage(text) {
+  // 展开组合词，让时间正则能正确匹配时间段前缀
+  text = text.replace(/明晚/g, '明天晚上').replace(/今晚/g, '今天晚上').replace(/明早/g, '明天早上').replace(/昨晚/g, '昨天晚上');
+  var result = { date: null, startTime: null, endTime: null, student: null, course: null };
+  var now = new Date();
+  var year = now.getFullYear();
+  var month = now.getMonth();
+  var today = now.getDate();
+
+  // 中文数字转阿拉伯
+  var cnNumMap = {'零':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10};
+  function cnToNum(s) {
+    if (/^\\.+$/.test(s)) return parseInt(s);
+    if (s === '十') return 10;
+    if (s.indexOf('十') >= 0) {
+      var parts = s.split('十');
+      var tens = parts[0] ? (cnNumMap[parts[0]] || 1) : 1;
+      var ones = parts[1] ? (cnNumMap[parts[1]] || 0) : 0;
+      return tens * 10 + ones;
+    }
+    return cnNumMap[s] !== undefined ? cnNumMap[s] : parseInt(s);
+  }
+  // 不做全局替换，在时间匹配时单独处理中文数字
+
+  function fmtDate(y, m, d) {
+    return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  }
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  function to24h(period, hour) {
+    if ((period === '下午' || period === '晚上' || period === '傍晚' || period === '晚间') && hour < 12) hour += 12;
+    if (period === '中午' && hour < 12) hour += 12;
+    return hour;
+  }
+
+  // ---- Extract date ----
+  // 今天/今晚
+  if (/今天|今日|今晚/.test(text)) {
+    result.date = fmtDate(year, month + 1, today);
+  }
+  // 明天/明日/明晚/明早
+  if (/明天|明日|明晚|明早/.test(text) && !result.date) {
+    var d = new Date(now); d.setDate(today + 1);
+    result.date = fmtDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  }
+  if (/后天/.test(text) && !result.date) {
+    var d = new Date(now); d.setDate(today + 2);
+    result.date = fmtDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  }
+  // X号, X日
+  if (!result.date) {
+    var dayMatch = text.match(/(\d{1,2})[号日]/);
+    if (dayMatch) {
+      var day = parseInt(dayMatch[1]);
+      var m = month;
+      var y = year;
+      if (day < today) { m += 1; if (m > 11) { m = 0; y += 1; } }
+      result.date = fmtDate(y, m + 1, day);
+    }
+  }
+  // 周X
+  if (!result.date) {
+    var weekdayMatch = text.match(/周([一二三四五六日天])/);
+    if (weekdayMatch) {
+      var weekdayMap = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'日':0,'天':0};
+      var target = weekdayMap[weekdayMatch[1]];
+      var diff = target - now.getDay();
+      if (diff <= 0) diff += 7;
+      var td = new Date(now); td.setDate(today + diff);
+      result.date = fmtDate(td.getFullYear(), td.getMonth() + 1, td.getDate());
+    }
+  }
+  // MM/DD or M.D
+  if (!result.date) {
+    var mdMatch = text.match(/(\d{1,2})[\/\.](\d{1,2})/);
+    if (mdMatch) {
+      result.date = fmtDate(year, parseInt(mdMatch[1]), parseInt(mdMatch[2]));
+    }
+  }
+
+  // ---- Extract time ----
+  var timeExtracted = false;
+  var numPattern = '(?:\\d{1,2}|[零一二两三四五六七八九十]+)';
+
+  // Pattern: 上午X点到(下午)Y:MM（混合格式：左边X点，右边HH:MM）
+  if (!timeExtracted) {
+    var mixedRangeMatch = text.match(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?(' + numPattern + ')点\\s*[到至~-]\\s*(上午|早上|中午|下午|晚上|傍晚|间)?(' + numPattern + '):(\\d{1,2})'));
+    if (mixedRangeMatch) {
+      var p1 = mixedRangeMatch[1] || '';
+      var h1 = cnToNum(mixedRangeMatch[2]);
+      var p2 = mixedRangeMatch[3] || p1;
+      var h2 = cnToNum(mixedRangeMatch[4]);
+      var m2 = parseInt(mixedRangeMatch[5]);
+      if (!p1 && h1 <= 6) h1 += 12;
+      if (!p2 && h2 <= 6) h2 += 12;
+      if (p1) h1 = to24h(p1, h1);
+      if (p2) h2 = to24h(p2, h2);
+      result.startTime = pad2(h1) + ':00';
+      result.endTime = pad2(h2) + ':' + pad2(m2);
+      timeExtracted = true;
+    }
+  }
+
+  // Pattern: (上午)X:MM到(下午)Y点（混合格式：左边HH:MM，右边X点）
+  if (!timeExtracted) {
+    var mixedRangeMatch2 = text.match(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?(' + numPattern + '):(\\d{1,2})\\s*[到至~-]\\s*(上午|早上|中午|下午|晚上|傍晚|间)?(' + numPattern + ')点(半)?'));
+    if (mixedRangeMatch2) {
+      var p1 = mixedRangeMatch2[1] || '';
+      var h1 = cnToNum(mixedRangeMatch2[2]);
+      var m1 = parseInt(mixedRangeMatch2[3]);
+      var p2 = mixedRangeMatch2[4] || p1;
+      var h2 = cnToNum(mixedRangeMatch2[5]);
+      var half2 = mixedRangeMatch2[6] === '半';
+      if (!p1 && h1 <= 6) h1 += 12;
+      if (!p2 && h2 <= 6) h2 += 12;
+      if (p1) h1 = to24h(p1, h1);
+      if (p2) h2 = to24h(p2, h2);
+      result.startTime = pad2(h1) + ':' + pad2(m1);
+      result.endTime = pad2(h2) + ':' + (half2 ? '30' : '00');
+      timeExtracted = true;
+    }
+  }
+
+  // Pattern: 下午X点半到Y点 / 晚上X点到Y点 / 上午X点到Y点半
+  if (!timeExtracted) {
+    var rangePeriodMatch = text.match(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?(' + numPattern + ')点(半)?\\s*[到至~-]\\s*(上午|早上|中午|下午|晚上|傍晚|间)?(' + numPattern + ')点(半)?'));
+    if (rangePeriodMatch) {
+      var p1 = rangePeriodMatch[1] || '';
+      var h1 = cnToNum(rangePeriodMatch[2]);
+      var half1 = rangePeriodMatch[3] === '半';
+      var p2 = rangePeriodMatch[4] || p1;
+      var h2 = cnToNum(rangePeriodMatch[5]);
+      var half2 = rangePeriodMatch[6] === '半';
+      // 如果没有时间段前缀但小时<=6，默认下午
+      if (!p1 && h1 <= 6) h1 += 12;
+      if (!p2 && h2 <= 6) h2 += 12;
+      if (p1) h1 = to24h(p1, h1);
+      if (p2) h2 = to24h(p2, h2);
+      result.startTime = pad2(h1) + ':' + (half1 ? '30' : '00');
+      result.endTime = pad2(h2) + ':' + (half2 ? '30' : '00');
+      timeExtracted = true;
+    }
+  }
+
+  // Pattern: (前缀)HH:MM-HH:MM or HH:MM~HH:MM
+  if (!timeExtracted) {
+    var rangeMatch = text.match(/(?:今晚|明晚|明早|昨晚|上午|早上|中午|下午|晚上|傍晚|晚间)?\s*(\d{1,2}):(\d{2})\s*[-~至到]\s*(\d{1,2}):(\d{2})/);
+    if (rangeMatch) {
+      var h1 = parseInt(rangeMatch[1]);
+      var h2 = parseInt(rangeMatch[3]);
+      // 检查前面是否有晚/下午/晚上等前缀
+      var prefixMatch = text.match(/(今晚|明晚|昨晚|下午|晚上|傍晚|晚间)\s*(\d{1,2}):(\d{2})/);
+      var isEvening = !!prefixMatch;
+      var morningMatch = text.match(/(明早|上午|早上)\s*(\d{1,2}):(\d{2})/);
+      var isMorning = !!morningMatch;
+      if (isEvening && h1 < 12) h1 += 12;
+      if (isEvening && h2 < 12) h2 += 12;
+      // 如果没有前缀且小时 <= 6，默认下午
+      if (!isEvening && !isMorning && h1 <= 6) h1 += 12;
+      if (!isEvening && !isMorning && h2 <= 6) h2 += 12;
+      result.startTime = pad2(h1) + ':' + rangeMatch[2];
+      result.endTime = pad2(h2) + ':' + rangeMatch[4];
+      timeExtracted = true;
+    }
+  }
+
+  // Pattern: 下午X点Y分 到 下午Z点W分
+  if (!timeExtracted) {
+    var fullRangeMatch = text.match(/(上午|早上|中午|下午|晚上|傍晚|间)(\d{1,2})[点时:：](\d{1,2})分?\s*[到至~-]\s*(上午|早上|中午|下午|晚上|傍晚|间)?(\d{1,2})[点时:：](\d{1,2})分?/);
+    if (fullRangeMatch) {
+      var h1 = to24h(fullRangeMatch[1], parseInt(fullRangeMatch[2]));
+      var h2 = to24h(fullRangeMatch[4] || fullRangeMatch[1], parseInt(fullRangeMatch[5]));
+      result.startTime = pad2(h1) + ':' + pad2(parseInt(fullRangeMatch[3]));
+      result.endTime = pad2(h2) + ':' + pad2(parseInt(fullRangeMatch[6]));
+      timeExtracted = true;
+    }
+  }
+
+  // Pattern: (下午)X点半 单个 - 放在X点之前匹配
+  if (!timeExtracted) {
+    var halfPeriodMatch = text.match(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?(' + numPattern + ')点半'));
+    if (halfPeriodMatch) {
+      var hour = to24h(halfPeriodMatch[1] || '', cnToNum(halfPeriodMatch[2]));
+      result.startTime = pad2(hour) + ':30';
+      result.endTime = pad2((hour + 1) % 24) + ':30';
+      timeExtracted = true;
+    }
+  }
+
+  // Pattern: X点半 单个（无时间段前缀）
+  if (!timeExtracted) {
+    var halfMatch = text.match(new RegExp('(' + numPattern + ')点半'));
+    if (halfMatch) {
+      var hour = cnToNum(halfMatch[1]);
+      if (hour <= 6) hour += 12;
+      result.startTime = pad2(hour) + ':30';
+      result.endTime = pad2((hour + 1) % 24) + ':30';
+      timeExtracted = true;
+    }
+  }
+
+  // Pattern: 下午X点(分) 单个时间点，默认1小时
+  if (!timeExtracted) {
+    var periodMatch = text.match(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?(' + numPattern + ')[点时:：](?:(\\d{1,2})分?)?'));
+    if (periodMatch) {
+      var hour = to24h(periodMatch[1] || '', cnToNum(periodMatch[2]));
+      var min = periodMatch[3] ? parseInt(periodMatch[3]) : 0;
+      result.startTime = pad2(hour) + ':' + pad2(min);
+      result.endTime = pad2((hour + 1) % 24) + ':' + pad2(min);
+      timeExtracted = true;
+    }
+  }
+
+  // Pattern: X点 单个
+  if (!timeExtracted) {
+    var hourOnly = text.match(new RegExp('(?<!\\\\d)(' + numPattern + ')点(?!半)'));
+    if (hourOnly) {
+      var hour = cnToNum(hourOnly[1]);
+      if (hour <= 6) hour += 12;
+      result.startTime = pad2(hour) + ':00';
+      result.endTime = pad2((hour + 1) % 24) + ':00';
+      timeExtracted = true;
+    }
+  }
+
+  // Pattern: standalone HH:MM
+  if (!timeExtracted) {
+    var timeMatch = text.match(/(\d{1,2}):(\d{2})/);
+    if (timeMatch) {
+      result.startTime = pad2(parseInt(timeMatch[1])) + ':' + timeMatch[2];
+      var defaultEndHour = parseInt(timeMatch[1]) + 1;
+      result.endTime = pad2(defaultEndHour % 24) + ':' + timeMatch[2];
+      timeExtracted = true;
+    }
+  }
+
+  // ---- Extract duration (时长) ----
+  // 如果只识别到单个时间点（没有范围），检查文本中是否有时长描述
+  if (result.startTime && result.endTime) {
+    var startTimeMin = timeToMinutes(result.startTime);
+    var defaultEndMin = timeToMinutes(result.endTime);
+    // 如果 endTime - startTime 刚好是60分钟，说明是默认+1小时，检查是否有自定义时长
+    // 如果 endTime - startTime 刚好是60分钟（或跨天差60分钟），说明是默认+1小时，检查是否有自定义时长
+    var diff = defaultEndMin - startTimeMin;
+    if (diff === 60 || diff === -1380) {
+      // pretalk 默认半小时
+      if (/pretalk/i.test(text)) {
+        var newEndMin = startTimeMin + 30;
+        result.endTime = pad2(Math.floor(newEndMin / 60)) + ':' + pad2(newEndMin % 60);
+      } else {
+      var durationMatch = text.match(/(\d+(?:\.\d+)?)\s*(h|H|小时|个小时)/);
+      if (durationMatch) {
+        var hours = parseFloat(durationMatch[1]);
+        var durationMin = Math.round(hours * 60);
+        var newEndMin = startTimeMin + durationMin;
+        var newEndHour = Math.floor(newEndMin / 60) % 24;
+        var newEndMin2 = newEndMin % 60;
+        result.endTime = pad2(newEndHour) + ':' + pad2(newEndMin2);
+      } else {
+        // 中文数字时长：一小时、一个半小时、半小时等
+        var cnDurationMatch = text.match(/([零一二两三四五六七八九十]+)\s*个?\s*(半小时|小时)/);
+        if (cnDurationMatch) {
+          var cnHours = cnToNum(cnDurationMatch[1]);
+          var extraMin = 0;
+          if (cnDurationMatch[2] === '半小时') extraMin = 30;
+          var durationMin = cnHours * 60 + extraMin;
+          var newEndMin = startTimeMin + durationMin;
+          var newEndHour = Math.floor(newEndMin / 60) % 24;
+          var newEndMin2 = newEndMin % 60;
+          result.endTime = pad2(newEndHour) + ':' + pad2(newEndMin2);
+        } else if (/半小时/.test(text)) {
+          var newEndMin = startTimeMin + 30;
+          var newEndHour = Math.floor(newEndMin / 60);
+          var newEndMin2 = newEndMin % 60;
+          result.endTime = pad2(newEndHour) + ':' + pad2(newEndMin2);
+        }
+      }
+      }
+    }
+  }
+
+  // ---- Extract subject (会议主题) ----
+  // 移除所有日期、时间相关的文本，剩下的就是会议主题
+  var numP = '(?:\\d{1,2}|[零一二两三四五六七八九十]+)';
+  var cleanText = text
+    .replace(/今天|今日|今晚|明天|明日|明晚|明早|后天/g, '')
+    .replace(new RegExp('(' + numP + ')[号日]', 'g'), '')
+    .replace(/周[一二三四五六日天]/g, '')
+    .replace(/(\d{1,2})[\/\.](\d{1,2})/g, '')
+    // 先移除混合格式范围（X点到Y:MM 或 X:MM到Y点）
+    .replace(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')点\\s*[到至~-]\\s*(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + '):(\\d{1,2})', 'g'), '')
+    .replace(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + '):(\\d{1,2})\\s*[到至~-]\\s*(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')点(半)?', 'g'), '')
+    .replace(/(\d{1,2}):(\d{2})/g, '')
+    .replace(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')点半', 'g'), '')
+    .replace(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')[点时:：](\\d{1,2})?\\s*分?\\s*[到至~-]\\s*(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')[点时:：](\\d{1,2})?\\s*分?', 'g'), '')
+    .replace(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')[点时:：](\\d{1,2})?\\s*分?', 'g'), '')
+    .replace(new RegExp('(' + numP + ')点(?!半)', 'g'), '')
+    .replace(/[-~至到]/g, '')
+    .replace(/北京时间|中国标准时间|GMT\+08:?00/g, '')
+    .replace(/\d+(\.\d+)?\s*(h|H|小时|个小时)/g, '')
+    .replace(/([零一二两三四五六七八九十]+\s*个?\s*小时)/g, '')
+    .replace(/半小时/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (cleanText) {
+    // 会议主题就是清理后的整个文本，不再拆分学生和课程
+    result.student = cleanText;
+    result.course = '';
+  }
+
+  return result;
+}
+
+// ========== Overview Page ==========
+async function renderTimeline() {
+  var date = document.getElementById('overviewDate').value;
+  var wrap = document.getElementById('timelineWrap');
+  if (!date) {
+    wrap.innerHTML = '<div class="empty-state"><div class="icon">&#128197;</div><p>请选择日期查看时间线</p></div>';
+    return;
+  }
+
+  var data = await loadData();
+  if (data.accounts.length === 0) {
+    wrap.innerHTML = '<div class="empty-state"><p>请先在"账号管理"中导入账号</p></div>';
+    return;
+  }
+
+  // Define time range: 6:00 - 23:00
+  var startHour = 6;
+  var endHour = 23;
+  var totalSlots = (endHour - startHour) * 4; // 15-min slots
+  var slotWidth = 100 / totalSlots;
+
+  var daySchedules = data.schedules.filter(function(s) { return s.date === date; });
+
+  var html = '<div class="timeline-container"><div class="timeline">';
+
+  // Hour labels
+  html += '<div class="timeline-row timeline-hours">';
+  html += '<div class="timeline-label timeline-hours-label"></div>';
+  html += '<div class="timeline-hour-slots">';
+  for (var h = startHour; h < endHour; h++) {
+    for (var q = 0; q < 4; q++) {
+      if (q === 0) {
+        html += '<div class="timeline-hour-label">' + String(h).padStart(2, '0') + ':00</div>';
+      } else {
+        html += '<div class="timeline-hour-label"></div>';
+      }
+    }
+  }
+  html += '</div></div>';
+
+  // Account rows
+  data.accounts.forEach(function(account) {
+    var accountScheds = daySchedules.filter(function(s) { return s.account === account; });
+    html += '<div class="timeline-row">';
+    html += '<div class="timeline-label" title="' + account + '">' + account + '</div>';
+    html += '<div class="timeline-slots" style="position:relative;">';
+
+    // Empty slots
+    for (var i = 0; i < totalSlots; i++) {
+      html += '<div class="timeline-slot" style="width:' + slotWidth + '%"></div>';
+    }
+
+    // Schedule blocks
+    accountScheds.forEach(function(s) {
+      var sMin = timeToMinutes(s.startTime);
+      var eMin = timeToMinutes(s.endTime);
+      var offset = ((sMin - startHour * 60) / (totalSlots * 15)) * 100;
+      var width = ((eMin - sMin) / (totalSlots * 15)) * 100;
+      var title = s.student + (s.course ? ' - ' + s.course : '') + ' ' + s.startTime + '-' + s.endTime;
+      html += '<div class="timeline-block" style="left:' + offset + '%;width:' + width + '%" title="' + title + '" onclick="openEditModal(\'' + s.id + '\')"><span class="block-name">' + s.student + (s.course ? ' ' + s.course : '') + '</span><span class="block-time">' + s.startTime + '-' + s.endTime + '</span></div>';
+    });
+
+    html += '</div></div>';
+  });
+
+  html += '</div></div>';
+  wrap.innerHTML = html;
+}
+
+// ========== Accounts Page ==========
+async function renderAccounts() {
+  var data = await loadData();
+  var list = document.getElementById('accountList');
+  document.getElementById('accountCount').textContent = data.accounts.length;
+
+  if (data.accounts.length === 0) {
+    list.innerHTML = '<div class="empty-state" style="width:100%;"><div class="icon">&#128100;</div><p>还没有账号，请在下方批量导入</p></div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  data.accounts.forEach(function(account, idx) {
+    var tag = document.createElement('span');
+    tag.className = 'account-tag';
+    tag.innerHTML = '<span>' + account + '</span>';
+    var btn = document.createElement('button');
+    btn.className = 'remove';
+    btn.textContent = '\u00d7';
+    btn.title = '删除账号';
+    btn.addEventListener('click', function() { removeAccount(idx); });
+    tag.appendChild(btn);
+    list.appendChild(tag);
+  });
+}
+
+async function batchImportAccounts() {
+  var text = document.getElementById('importAccounts').value.trim();
+  if (!text) { showToast('请输入账号列表', 'error'); return; }
+
+  var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+  if (lines.length === 0) { showToast('未检测到有效账号', 'error'); return; }
+
+  try {
+    var result = await apiPost('/api/accounts/add', { names: lines });
+    showToast('导入完成，新增 ' + result.added + ' 个账号（跳过 ' + (lines.length - result.added) + ' 个重复）', 'success');
+  } catch(e) {
+    showToast(e.message, 'error');
+    return;
+  }
+  renderAccounts();
+  document.getElementById('importAccounts').value = '';
+  showToast('导入完成，新增 ' + added + ' 个账号（跳过 ' + (lines.length - added) + ' 个重复）', 'success');
+}
+
+async function removeAccount(idx) {
+  var data = await loadData();
+  var account = data.accounts[idx];
+
+  try {
+    await apiPost('/api/account/remove', { name: account });
+  } catch(e) {
+    showToast(e.message, 'error');
+    return;
+  }
+  renderAccounts();
+  showToast('已删除账号: ' + account, 'info');
+}
+
+// ========== Records Page ==========
+async function renderRecords() {
+  var data = await loadData();
+  var dateFilter = document.getElementById('filterDate').value;
+  var studentFilter = document.getElementById('filterStudent').value.trim().toLowerCase();
+  var accountFilter = document.getElementById('filterAccount').value.trim().toLowerCase();
+
+  var filtered = data.schedules.filter(function(s) {
+    if (dateFilter && s.date !== dateFilter) return false;
+    if (studentFilter && s.student.toLowerCase().indexOf(studentFilter) === -1) return false;
+    if (accountFilter && s.account.toLowerCase().indexOf(accountFilter) === -1) return false;
+    return true;
+  });
+
+  // Sort by date desc, then startTime asc
+  filtered.sort(function(a, b) {
+    if (a.date !== b.date) return b.date > a.date ? 1 : -1;
+    return timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
+  });
+
+  // Update account select dropdown
+  var sel = document.getElementById('filterAccountSelect');
+  var currentVal = sel.value;
+  sel.innerHTML = '<option value="">所有账号</option>';
+  data.accounts.forEach(function(a) {
+    var opt = document.createElement('option');
+    opt.value = a;
+    opt.textContent = a;
+    sel.appendChild(opt);
+  });
+  sel.value = currentVal;
+
+  var wrap = document.getElementById('recordsTableWrap');
+
+  if (filtered.length === 0) {
+    wrap.innerHTML = '<div class="empty-state"><div class="icon">&#128203;</div><p>没有匹配的排课记录</p></div>';
+    return;
+  }
+
+  var html = '<table>';
+  html += '<thead><tr><th>日期</th><th>时间</th><th>账号</th><th>学生</th><th>课程</th><th>会议号</th><th>操作</th></tr></thead>';
+  html += '<tbody>';
+  filtered.forEach(function(s) {
+    html += '<tr>';
+    html += '<td>' + s.date + '<br><span style="color:var(--text-light);font-size:12px;">' + formatDate(s.date) + '</span></td>';
+    html += '<td>' + s.startTime + ' - ' + s.endTime + '</td>';
+    html += '<td><span class="badge badge-primary">' + s.account + '</span></td>';
+    html += '<td>' + s.student + '</td>';
+    html += '<td>' + (s.course || '-') + '</td>';
+    html += '<td>' + (s.meetingId || '-') + '</td>';
+    html += '<td><button class="btn btn-outline btn-sm" onclick="openEditModal(\'' + s.id + '\')">编辑</button></td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function setFilterAccount(val) {
+  document.getElementById('filterAccount').value = val;
+  renderRecords();
+}
+
+function clearFilters() {
+  document.getElementById('filterDate').value = '';
+  document.getElementById('filterStudent').value = '';
+  document.getElementById('filterAccount').value = '';
+  document.getElementById('filterAccountSelect').value = '';
+  renderRecords();
+}
+
+// ========== Edit Modal ==========
+var editingId = null;
+
+async function openEditModal(id) {
+  var data = await loadData();
+  var sched = data.schedules.find(function(s) { return s.id === id; });
+  if (!sched) return;
+
+  editingId = id;
+  document.getElementById('editDate').value = sched.date;
+  document.getElementById('editStart').value = sched.startTime;
+  document.getElementById('editEnd').value = sched.endTime;
+  document.getElementById('editAccount').value = sched.account;
+  document.getElementById('editStudent').value = sched.student;
+  document.getElementById('editCourseText').value = sched.course || '';
+  document.getElementById('editMeetingId').value = sched.meetingId || '';
+
+  document.getElementById('editModal').classList.add('active');
+}
+
+function closeEditModal() {
+  document.getElementById('editModal').classList.remove('active');
+  editingId = null;
+}
+
+async function saveEdit() {
+  if (!editingId) return;
+
+  var date = document.getElementById('editDate').value;
+  var startTime = document.getElementById('editStart').value;
+  var endTime = document.getElementById('editEnd').value;
+  var account = document.getElementById('editAccount').value.trim();
+  var student = document.getElementById('editStudent').value.trim();
+  var course = document.getElementById('editCourseText').value.trim();
+  var meetingId = document.getElementById('editMeetingId').value.trim();
+
+  if (!date || !startTime || !endTime || !account || !student) {
+    showToast('请填写完整的必填信息', 'error');
+    return;
+  }
+  if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+    showToast('结束时间必须大于开始时间', 'error');
+    return;
+  }
+
+  try {
+    await apiPost('/api/schedule/update', {
+      id: editingId, account: account, date: date, startTime: startTime, endTime: endTime,
+      student: student, course: course, meetingId: meetingId
+    });
+    showToast('排课已更新', 'success');
+  } catch(e) {
+    showToast(e.message, 'error');
+    return;
+  }
+
+  closeEditModal();
+  // Refresh current page
+  renderRecords();
+  renderTimeline();
+}
+
+async function deleteFromEdit() {
+  if (!editingId) return;
+  var delId = editingId;
+  closeEditModal();
+  showConfirm('确定要删除这条排课记录吗？此操作不可撤销。', async function() {
+    try {
+      await apiPost('/api/schedule/delete', { id: delId });
+    } catch(e) {
+      showToast(e.message, 'error');
+      return;
+    }
+    showToast('排课已删除', 'info');
+    renderRecords();
+    renderTimeline();
+  });
+}
+
+// ========== Playback ==========
+async function queryPlayback() {
+  var code = document.getElementById('playbackMeetingCode').value.trim();
+  if (!code) { showToast('请输入会议号', 'error'); return; }
+  showToast('正在查询回放信息...', 'info');
+  try {
+    var resp = await apiPost('/api/tencent/playback', { meetingCode: code });
+    if (resp.error) {
+      showToast(resp.error, 'error');
+      return;
+    }
+    var text = '录制: ' + resp.subject + '\n';
+    text += '日期: ' + resp.recordTime + '\n';
+    text += '录制文件：' + resp.playbackUrl;
+    document.getElementById('playbackText').value = text;
+    document.getElementById('playbackModal').classList.add('active');
+  } catch(e) {
+    showToast('查询失败: ' + e.message, 'error');
+  }
+}
+function closePlayback() {
+  document.getElementById('playbackModal').classList.remove('active');
+}
+
+async function cancelMeeting() {
+  var code = document.getElementById('playbackMeetingCode').value.trim();
+  if (!code) { showToast('请输入会议号', 'error'); return; }
+  var confirmed = confirm('确定要取消会议号为 ' + code + ' 的腾讯会议吗？\n此操作不可撤销，将同时删除本地排课记录。');
+  if (!confirmed) return;
+  showToast('正在取消会议...', 'info');
+  try {
+    var resp = await apiPost('/api/tencent/cancel-meeting', { meetingCode: code });
+    if (resp.error) {
+      showToast(resp.error, 'error');
+      return;
+    }
+    showToast('会议已取消: ' + (resp.subject || code), 'success');
+    document.getElementById('playbackMeetingCode').value = '';
+  } catch(e) {
+    showToast('取消失败: ' + e.message, 'error');
+  }
+}
+function copyPlayback() {
+  var textarea = document.getElementById('playbackText');
+  textarea.select();
+  document.execCommand('copy');
+  showToast('已复制到剪贴板', 'success');
+}
+
+// ========== Invitation Modal ==========
+function showInvitation(text) {
+  document.getElementById('invitationText').value = text;
+  document.getElementById('invitationModal').classList.add('active');
+}
+function closeInvitation() {
+  document.getElementById('invitationModal').classList.remove('active');
+}
+function copyInvitation() {
+  var textarea = document.getElementById('invitationText');
+  textarea.select();
+  document.execCommand('copy');
+  showToast('已复制到剪贴板', 'success');
+}
+
+// ========== Confirm Modal ==========
+var confirmCallback = null;
+
+function showConfirm(msg, cb) {
+  document.getElementById('confirmMessage').textContent = msg;
+  confirmCallback = cb;
+  document.getElementById('confirmModal').classList.add('active');
+  document.getElementById('confirmYes').onclick = function() {
+    closeConfirm();
+    if (confirmCallback) confirmCallback();
+  };
+}
+
+function closeConfirm() {
+  document.getElementById('confirmModal').classList.remove('active');
+  confirmCallback = null;
+}
+
+// ========== Recording Capacity Page ==========
+async function loadRecordingCapacity() {
+  var loading = document.getElementById('capacityLoading');
+  var table = document.getElementById('capacityTable');
+  var summary = document.getElementById('capacitySummary');
+  loading.style.display = 'block';
+  table.innerHTML = '';
+  summary.textContent = '';
+  try {
+    var resp = await apiPost('/api/tencent/recording-capacity', {});
+    loading.style.display = 'none';
+    if (resp.error) {
+      table.innerHTML = '<div style="text-align:center; padding:20px; color:var(--danger);">' + resp.error + '</div>';
+      return;
+    }
+    summary.textContent = '总计: ' + resp.total_size_text + ' / ' + resp.total_files + ' 个录制文件';
+    if (!resp.accounts || resp.accounts.length === 0) {
+      table.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-light);">暂无录制数据</div>';
+      return;
+    }
+    var max = resp.accounts[0].total_size || 1;
+    var html = '<table class="data-table"><thead><tr><th>#</th><th>教师账号</th><th>已用容量</th><th>文件数</th><th style="width:30%;">容量占比</th></tr></thead><tbody>';
+    resp.accounts.forEach(function(item, i) {
+      var pct = max > 0 ? (item.total_size / max * 100) : 0;
+      var barColor = pct > 80 ? 'var(--danger)' : pct > 50 ? 'var(--warning)' : 'var(--success)';
+      html += '<tr><td>' + (i + 1) + '</td><td>' + item.account + '</td><td style="font-weight:600;">' + item.size_text + '</td><td>' + item.file_count + '</td><td><div style="background:var(--bg); border-radius:4px; height:18px; overflow:hidden;"><div style="width:' + pct + '%; height:100%; background:' + barColor + '; transition:width 0.3s;"></div></div></td></tr>';
+    });
+    html += '</tbody></table>';
+    table.innerHTML = html;
+  } catch(e) {
+    loading.style.display = 'none';
+    table.innerHTML = '<div style="text-align:center; padding:20px; color:var(--danger);">' + e.message + '</div>';
+  }
+}
+
+// ========== Stats Page ==========
+async function renderStats() {
+  var data = await loadData();
+  var now = new Date();
+
+  // This week range
+  var dayOfWeek = now.getDay() || 7;
+  var monday = new Date(now);
+  monday.setDate(now.getDate() - dayOfWeek + 1);
+  monday.setHours(0, 0, 0, 0);
+
+  var sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+
+  // This month range
+  var monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  var monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+  function toDateStr(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  var weekStr = toDateStr(monday) + '~' + toDateStr(sunday);
+  var monthStr = now.getFullYear() + '年' + (now.getMonth() + 1) + '月';
+
+  function countInRange(start, end) {
+    return data.schedules.filter(function(s) {
+      var t = new Date(s.date + 'T00:00:00');
+      return t >= start && t <= end;
+    }).length;
+  }
+
+  var weekCount = countInRange(monday, sunday);
+  var monthCount = countInRange(monthStart, monthEnd);
+  var totalStudents = [];
+  data.schedules.forEach(function(s) {
+    if (totalStudents.indexOf(s.student) === -1) totalStudents.push(s.student);
+  });
+
+  var todayStr = toDateStr(now);
+  var todayCount = data.schedules.filter(function(s) { return s.date === todayStr; }).length;
+
+  document.getElementById('statsGrid').innerHTML =
+    '<div class="stat-card"><div class="stat-value">' + data.accounts.length + '</div><div class="stat-label">总账号数</div></div>' +
+    '<div class="stat-card"><div class="stat-value">' + data.schedules.length + '</div><div class="stat-label">总排课数</div></div>' +
+    '<div class="stat-card"><div class="stat-value">' + todayCount + '</div><div class="stat-label">今日排课</div></div>' +
+    '<div class="stat-card"><div class="stat-value">' + weekCount + '</div><div class="stat-label">本周排课 (' + weekStr + ')</div></div>' +
+    '<div class="stat-card"><div class="stat-value">' + monthCount + '</div><div class="stat-label">本月排课 (' + monthStr + ')</div></div>' +
+    '<div class="stat-card"><div class="stat-value">' + totalStudents.length + '</div><div class="stat-label">学生人数</div></div>';
+
+  // Account utilization ranking
+  var accountUsage = {};
+  data.accounts.forEach(function(a) { accountUsage[a] = 0; });
+  data.schedules.forEach(function(s) {
+    if (accountUsage[s.account] !== undefined) accountUsage[s.account]++;
+  });
+
+  var ranked = Object.keys(accountUsage).map(function(a) { return { account: a, count: accountUsage[a] }; });
+  ranked.sort(function(a, b) { return b.count - a.count; });
+
+  var maxCount = ranked.length > 0 ? ranked[0].count : 0;
+
+  var tableHtml = '<table><thead><tr><th>排名</th><th>账号</th><th>排课数</th><th>利用率</th><th>占比</th></tr></thead><tbody>';
+  ranked.forEach(function(item, idx) {
+    var pct = maxCount > 0 ? Math.round((item.count / maxCount) * 100) : 0;
+    var barColor = pct > 80 ? 'var(--danger)' : pct > 50 ? 'var(--warning)' : 'var(--success)';
+    tableHtml += '<tr>';
+    tableHtml += '<td>' + (idx + 1) + '</td>';
+    tableHtml += '<td>' + item.account + '</td>';
+    tableHtml += '<td>' + item.count + '</td>';
+    tableHtml += '<td><div style="background:var(--bg);border-radius:4px;height:8px;width:100px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:4px;"></div></div></td>';
+    tableHtml += '<td>' + (data.schedules.length > 0 ? Math.round((item.count / data.schedules.length) * 100) : 0) + '%</td>';
+    tableHtml += '</tr>';
+  });
+  tableHtml += '</tbody></table>';
+
+  document.getElementById('accountStatsTable').innerHTML = tableHtml;
+}
+
+// ========== Sync Tencent Meeting ==========
+async function syncTencentData() {
+  var btn = document.getElementById('syncBtn');
+  btn.disabled = true;
+  btn.textContent = '同步中...';
+  showToast('正在从腾讯会议同步数据，请稍候...', 'info');
+  try {
+    var resp = await apiPost('/api/tencent/sync', {});
+    var msg = '同步完成';
+    if (resp.new_meetings > 0) msg += '，新增 ' + resp.new_meetings + ' 条';
+    if (resp.deleted_meetings > 0) msg += '，删除 ' + resp.deleted_meetings + ' 条';
+    showToast(msg, 'success');
+    // 刷新当前页面
+    var activeTab = document.querySelector('.tab.active');
+    if (activeTab) {
+      if (activeTab.dataset.page === 'records') renderRecords();
+      else if (activeTab.dataset.page === 'overview') renderTimeline();
+      else if (activeTab.dataset.page === 'stats') renderStats();
+      else if (activeTab.dataset.page === 'accounts') renderAccounts();
+    }
+  } catch(e) {
+    showToast('同步失败: ' + e.message, 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = '同步腾讯会议';
+}
+
+// ========== Import / Export ==========
+async function exportData() {
+  var data = await loadData();
+  var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = '排课数据_' + new Date().toISOString().slice(0, 10) + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('数据已导出', 'success');
+}
+
+function importData() {
+  document.getElementById('importFile').click();
+}
+
+function handleImport(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var imported = JSON.parse(e.target.result);
+      if (!imported.accounts || !imported.schedules) {
+        showToast('文件格式不正确，请检查', 'error');
+        return;
+      }
+
+      var countText = '(导入 ' + imported.schedules.length + ' 条排课记录)';
+      showConfirm('导入将覆盖当前所有数据' + countText + '。确定继续吗？', async function() {
+        try {
+          await apiPut('/api/data/import', imported);
+        } catch(e) {
+          showToast(e.message, 'error');
+          return;
+        }
+        showToast('数据导入成功! ' + imported.accounts.length + ' 个账号, ' + imported.schedules.length + ' 条排课', 'success');
+        renderAccounts();
+        renderRecords();
+      });
+    } catch(err) {
+      showToast('文件解析失败，请确认是有效的 JSON 文件', 'error');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+// ========== Init ==========
+(async function init() {
+  setDefaultDate();
+  await renderAccounts();
+  // 页面加载后自动展示教室空闲状态
+  findFreeAccounts();
+})();
+</script>
+</body>
+</html>

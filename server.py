@@ -3,7 +3,6 @@
 腾讯会议排课调度工具 - 后端服务
 用法: python server.py
 访问: http://localhost:8080
-局域网: http://<本机IP>:8080
 """
 
 import json
@@ -18,7 +17,6 @@ import random
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from http.cookies import SimpleCookie
-import socket
 import secrets
 import threading
 import webbrowser
@@ -26,7 +24,7 @@ import requests as req_lib
 import subprocess
 
 PORT = int(os.getenv("SCHEDULE_PORT", "8080"))
-BIND_HOST = os.getenv("SCHEDULE_BIND_HOST", "0.0.0.0")
+BIND_HOST = os.getenv("SCHEDULE_BIND_HOST", "127.0.0.1")
 IS_FROZEN = getattr(sys, 'frozen', False)
 RESOURCE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.dirname(sys.executable) if IS_FROZEN else RESOURCE_DIR
@@ -915,25 +913,44 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
             return
         
         url = 'https://meeting.tencent.com/user-center'
-        # 尝试多个可能的Edge安装路径
-        edge_paths = [
-            r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
-            r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
-        ]
-        edge_exe = None
-        for p in edge_paths:
-            if os.path.isfile(p):
-                edge_exe = p
-                break
-        if not edge_exe:
-            self.send_error_json('未找到Edge浏览器，请确认Edge已安装')
-            return
         try:
-            subprocess.Popen(
-                [edge_exe, '--profile-directory=' + edge_profile, url],
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
-            )
-            self.send_json({'success': True, 'message': '已打开Edge浏览器'})
+            if sys.platform == 'win32':
+                edge_paths = [
+                    r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+                    r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+                    os.path.expandvars(r'%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe'),
+                ]
+                edge_exe = next((p for p in edge_paths if os.path.isfile(p)), None)
+                if not edge_exe:
+                    self.send_error_json('未找到Edge浏览器，请确认Edge已安装')
+                    return
+                subprocess.Popen(
+                    [edge_exe, '--profile-directory=' + edge_profile, url],
+                    creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+                )
+            elif sys.platform == 'darwin':
+                edge_apps = [
+                    '/Applications/Microsoft Edge.app',
+                    os.path.expanduser('~/Applications/Microsoft Edge.app'),
+                ]
+                if not any(os.path.isdir(path) for path in edge_apps):
+                    self.send_error_json('未找到Microsoft Edge，请先在Mac上安装Edge浏览器')
+                    return
+                subprocess.Popen(
+                    [
+                        'open', '-na', 'Microsoft Edge', '--args',
+                        '--profile-directory=' + edge_profile, url
+                    ],
+                    start_new_session=True
+                )
+            else:
+                self.send_error_json('当前系统暂不支持自动打开Edge配置文件')
+                return
+            self.send_json({
+                'success': True,
+                'message': '已打开Edge浏览器',
+                'account': account_name
+            })
         except Exception as e:
             self.send_error_json('打开Edge失败: ' + str(e))
 
@@ -1101,25 +1118,15 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     init_db()
     
-    # Get local IP
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
-        s.close()
-    except:
-        local_ip = '127.0.0.1'
-    
     server = ThreadingHTTPServer((BIND_HOST, PORT), ScheduleHandler)
     
     print('=' * 50)
     print('  腾讯会议排课调度工具 已启动!')
     print('=' * 50)
     print(f'  本机访问:  http://localhost:{PORT}')
-    print(f'  局域网访问: http://{local_ip}:{PORT}')
     print(f'  数据库文件: {DB_FILE}')
     print(f'  登录保护:   {"已启用" if APP_PASSWORD else "未启用（仅建议本地使用）"}')
-    print(f'  请把局域网地址发给同事')
+    print(f'  每位同事请在自己的电脑上运行本工具')
     print('=' * 50)
     print('  按 Ctrl+C 停止服务')
     print()

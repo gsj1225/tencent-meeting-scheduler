@@ -30,6 +30,35 @@
 2. **Python 3.11 或更高版本**：Windows 安装时必须勾选 `Add Python to PATH`。
 3. **Microsoft Edge**：用于按不同账号的登录状态打开腾讯会议后台。
 
+### Windows 一次安装所需环境
+
+Windows 10/11 打开 PowerShell，依次执行：
+
+```powershell
+winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
+winget install --id Python.Python.3.11 -e --source winget --accept-package-agreements --accept-source-agreements
+winget install --id Microsoft.Edge -e --source winget --accept-package-agreements --accept-source-agreements
+```
+
+安装完成后关闭并重新打开 PowerShell。如果系统提示找不到 `winget`，请先在 Microsoft Store 安装或更新“应用安装程序（App Installer）”。Windows 通常已经自带 Edge，重复执行 Edge 安装命令不会影响已有配置。
+
+### macOS 一次安装所需环境
+
+Mac 打开“终端”。如果没有 Homebrew，先执行 Homebrew 官方安装命令：
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+安装结束后，按照终端最后显示的提示把 Homebrew 加入 PATH，或者关闭并重新打开终端。然后执行：
+
+```bash
+brew install git python3
+brew install --cask microsoft-edge
+```
+
+如果已经安装了其中某个软件，Homebrew 会保留现有安装或提示已经安装。
+
 Windows 打开 PowerShell 检查：
 
 ```powershell

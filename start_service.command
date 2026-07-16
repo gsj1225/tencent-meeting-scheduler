@@ -15,8 +15,10 @@ if [ -x ".venv/bin/python" ]; then
     PYTHON=".venv/bin/python"
 elif command -v python3 >/dev/null 2>&1; then
     PYTHON="python3"
+elif command -v python3.11 >/dev/null 2>&1; then
+    PYTHON="python3.11"
 else
-    echo "ERROR: python3 was not found. Run install_mac.command first."
+    echo "ERROR: Python 3.11 or newer was not found. Run install_mac.command first."
     printf '\nPress Enter to close this window...'
     read -r _
     exit 1

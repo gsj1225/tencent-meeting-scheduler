@@ -1,45 +1,251 @@
 # 腾讯会议排课调度工具
 
-适用于小团队的本地排课工具。每位使用者在自己的 Windows 电脑上运行程序并维护独立的 SQLite 数据库，同时通过同一企业授权同步腾讯会议中进行中或待开始的有效会议。
+这是一个供小团队使用的 Windows 本地排课工具。每位同事从私有 GitHub 仓库下载同一套程序，在自己的电脑上运行，并使用自己的本地数据库；所有人配置同一企业的腾讯会议 API 后，可以同步同一企业中的腾讯会议。
 
-## 数据模型
+## 先了解工作方式
 
-- 源码通过私有 GitHub 仓库共享。
-- `schedule_data.db` 只保存在各自电脑，不提交到 GitHub。
-- 腾讯会议 API 凭据保存在各自电脑的 Windows 用户环境变量中，不提交到 GitHub。
-- 腾讯会议同步可以让不同电脑看到同一企业的有效会议，但本地新增且未创建腾讯会议的排课不会自动共享。
+- GitHub 用来分发程序和后续更新，不用来同步排课数据库。
+- 每台电脑都会生成自己的 `schedule_data.db`，彼此独立。
+- 腾讯会议中已经创建的会议可以通过“同步腾讯会议”拉取到各自电脑。
+- 本地备注、导入数据以及尚未创建腾讯会议的内容不会自动分享给其他人。
+- 每个腾讯会议账号可以绑定一个 Edge 浏览器配置文件，点击“去排课”时会用对应的登录状态打开腾讯会议后台。
+- 所有电脑共用同一企业 API 的调用额度，请避免频繁重复同步或重复创建会议。
 
-## Windows 安装
+## 一、管理员先邀请同事
 
-1. 安装 Python 3.11 或更高版本，安装时勾选 `Add Python to PATH`。
-2. 克隆私有仓库或下载并解压 ZIP。
-3. 在项目文件夹打开 PowerShell，安装依赖：
+这是私有仓库，同事必须先获得访问权限，否则会看到 404 或无权访问。
 
-   ```powershell
-   python -m pip install -r requirements.txt
-   ```
+1. 管理员打开仓库：<https://github.com/gsj1225/tencent-meeting-scheduler>
+2. 进入 `Settings` → `Collaborators`。
+3. 点击 `Add people`，填写同事的 GitHub 用户名或邮箱。
+4. 同事登录自己的 GitHub 账号并接受邀请。
 
-4. 双击 `配置腾讯会议API.bat`，依次填写 AppId、SdkId、SecretId 和 SecretKey。
-5. 输入 SecretKey 后按 Enter，确认出现 `Configuration saved successfully`。
-6. 双击 `启动服务.bat`，浏览器会自动打开。
+## 二、同事电脑需要准备的环境
 
-## 日常使用
+仅支持 Windows，建议使用 Windows 10 或 Windows 11。
 
-- 启动：双击 `启动服务.bat`。
-- 停止：双击 `停止服务.bat`。
-- 备份：复制本机的 `schedule_data.db` 到安全位置。
-- 更新代码：停止服务后执行 `git pull`，再重新启动。
+需要安装：
 
-## 多人使用注意
+1. **Git**：用于克隆和更新项目。
+2. **Python 3.11 或更高版本**：安装时必须勾选 `Add Python to PATH`。
+3. **Microsoft Edge**：用于按不同账号的登录状态打开腾讯会议后台。
 
-- 所有人配置同一企业的腾讯会议 API 后，可以同步同一批腾讯会议。
-- 每台电脑的本地排课、备注和导入数据相互独立，不会经由 GitHub 自动合并。
-- 两个人同时创建或修改同一场会议可能产生重复或覆盖，建议约定谁负责创建和删除会议。
-- GitHub 只用来分发程序更新，不用来同步运行中的数据库。
+安装完成后打开 PowerShell，检查：
 
-## 安全说明
+```powershell
+git --version
+python --version
+```
 
-- 不要提交 `schedule_data.db`、备份文件或真实 API 凭据。
-- 不要通过聊天、截图或 GitHub Issue 发送 SecretId/SecretKey。
+两条命令都能显示版本号，才说明环境已经可用。
+
+## 三、从 GitHub 下载项目
+
+### 方法 A：使用 GitHub Desktop（推荐给不熟悉命令行的同事）
+
+1. 安装并登录 GitHub Desktop。
+2. 点击 `File` → `Clone repository`。
+3. 在仓库列表中选择 `gsj1225/tencent-meeting-scheduler`。
+4. 选择本机保存位置，然后点击 `Clone`。
+5. 在 GitHub Desktop 中点击 `Repository` → `Show in Explorer` 打开项目文件夹。
+
+### 方法 B：使用命令行
+
+打开 PowerShell，执行：
+
+```powershell
+git clone https://github.com/gsj1225/tencent-meeting-scheduler.git
+cd tencent-meeting-scheduler
+```
+
+如果提示登录，请使用已经接受仓库邀请的 GitHub 账号完成浏览器授权。GitHub 账号密码不能直接作为 Git 命令行密码使用。
+
+## 四、首次安装 Python 依赖
+
+在项目文件夹空白处按住 `Shift` 并点击鼠标右键，选择“在终端中打开”，然后执行：
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+看到安装成功后即可关闭终端。每台电脑首次下载时执行一次即可；以后如果 `requirements.txt` 有更新，再重新执行一次。
+
+如果提示找不到 `python`，请重新安装 Python 并勾选 `Add Python to PATH`，然后关闭并重新打开 PowerShell。
+
+## 五、配置腾讯会议 API
+
+每台电脑都要单独配置一次。API 凭据不会保存在 GitHub 项目中，而是保存在当前 Windows 用户的环境变量中。
+
+1. 双击 `配置腾讯会议API.bat`。
+2. 按顺序输入：
+   - `AppId`：企业 ID，通常是较短的纯数字。
+   - `SdkId`：腾讯会议自建应用的 SDK ID，通常是较长的纯数字。
+   - `SecretId`：自建应用的 SecretId。
+   - `SecretKey`：自建应用的 SecretKey。输入时窗口不会显示字符，这是正常现象。
+3. 输入 SecretKey 后按一次 `Enter`。
+4. 必须看到绿色提示 `Configuration saved successfully.` 才算配置完成。
+5. 如果服务已经运行，先停止服务，再重新启动。
+
+如果出现 `AppId and SdkId appear to be reversed`，说明两个数字可能填反了。不要把 SecretId、SecretKey 发到群聊、GitHub Issue 或截图中。
+
+## 六、启动和停止
+
+### 启动
+
+双击 `启动服务.bat`。
+
+- 程序会自动寻找 `8080` 到 `8099` 之间的可用端口。
+- 浏览器通常会自动打开，例如 `http://localhost:8080`。
+- 如果 8080 已被占用，程序会自动使用 8081、8082 等端口。
+- 启动窗口需要保持打开；关闭窗口会停止当前服务。
+
+### 停止
+
+双击 `停止服务.bat`。脚本只会停止本工具识别到的服务，不会随意结束其他占用端口的程序。
+
+## 七、首次同步腾讯会议
+
+1. 启动服务并进入工具首页。
+2. 点击右上角“同步腾讯会议”。
+3. 等待同步完成。
+4. 打开“日期总览”或“排课记录”，确认会议已经出现。
+
+首次同步后，本机才会拥有对应的本地排课记录。其他同事在自己的电脑上也需要单独点击同步。
+
+## 八、配置 Edge 多账号排课
+
+如果需要点击某个账号后直接打开它对应的腾讯会议登录状态，请为每个账号准备独立的 Edge 配置文件。
+
+### 1. 在 Edge 中创建并登录不同配置
+
+1. 打开 Microsoft Edge。
+2. 点击右上角头像，选择“添加配置文件”。
+3. 每个腾讯会议账号使用一个独立的 Edge 配置文件。
+4. 在各自配置文件中打开腾讯会议官网并登录对应账号。
+5. 不要退出登录，也不要清除该配置文件的 Cookie。
+
+### 2. 找到 Edge 配置名称
+
+在目标 Edge 配置文件中，在地址栏输入：
+
+```text
+edge://version
+```
+
+找到“配置文件路径”或 `Profile path`。只记录路径最后一段，例如：
+
+```text
+Default
+Profile 1
+Profile 2
+```
+
+这里需要填写的是文件夹名称，不是 Edge 右上角显示的中文昵称。
+
+### 3. 在工具中绑定
+
+1. 打开“账号管理”。
+2. 在账号右侧的“Edge配置”中填写 `Default`、`Profile 1` 等名称。
+3. 点击“保存”。
+4. 点击“去排课”测试是否打开了正确的 Edge 登录账号。
+
+## 九、日常排课流程
+
+1. 在“排课”页面填写日期、起止时间和会议主题。
+2. 查找空闲账号并选择一个账号。
+3. 点击“确认排课”或账号旁边的“去排课”。
+4. 工具会使用该账号绑定的 Edge 配置打开腾讯会议用户中心。
+5. 在腾讯会议页面中手动创建会议。
+6. 创建完成后回到工具，点击“同步腾讯会议”。
+7. 同步成功后，会议会进入本机排课记录。
+
+两个人不要同时创建或删除同一场会议，否则可能产生重复会议或数据不一致。建议团队约定会议创建和删除的负责人。
+
+## 十、更新到最新版本
+
+更新前先双击 `停止服务.bat`，然后使用以下任一种方法。
+
+### GitHub Desktop
+
+1. 打开对应仓库。
+2. 点击 `Fetch origin`。
+3. 如果出现 `Pull origin`，继续点击拉取。
+4. 重新双击 `启动服务.bat`。
+
+### 命令行
+
+在项目文件夹中打开 PowerShell：
+
+```powershell
+git pull
+python -m pip install -r requirements.txt
+```
+
+然后重新双击 `启动服务.bat`。
+
+正常更新不会删除本机的 `schedule_data.db`，但重要数据仍建议定期备份。
+
+## 十一、本地数据和备份
+
+- 主数据库：`schedule_data.db`
+- 数据库只保存在当前电脑，不会提交到 GitHub。
+- 备份方法：停止服务后，把 `schedule_data.db` 复制到安全位置。
+- 不要把一个正在使用的数据库同时放到多人共享网盘中运行。
+- 更换电脑时，可以在停止服务后复制旧电脑的 `schedule_data.db` 到新电脑的项目目录。
+
+## 十二、常见问题
+
+### 克隆时提示 404 或没有权限
+
+确认管理员已经邀请你的 GitHub 账号，并且你已经接受邀请；同时确认 GitHub Desktop 或浏览器登录的是被邀请的账号。
+
+### `python` 不是内部或外部命令
+
+重新安装 Python，并勾选 `Add Python to PATH`。安装后关闭所有 PowerShell 窗口再重新打开。
+
+### 提示缺少 `requests`
+
+在项目目录执行：
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+### 同步失败，使用本地数据
+
+依次检查：
+
+1. 网络是否正常。
+2. 是否完整执行了 `配置腾讯会议API.bat`。
+3. 是否看到 `Configuration saved successfully.`。
+4. AppId 和 SdkId 是否填反。
+5. SecretId、SecretKey 是否有效或已经在后台被重置。
+6. 配置后是否停止并重新启动了服务。
+
+### 点击“去排课”打开了错误账号
+
+在正确的 Edge 配置中打开 `edge://version`，重新确认 `Profile path` 的最后一段，并在“账号管理”中修改后保存。
+
+### 8080 端口被占用
+
+不需要手动处理。启动脚本会自动选择 8081 到 8099 中的空闲端口。浏览器打开的实际地址以启动窗口显示为准。
+
+### 双击启动后窗口立即关闭
+
+在项目文件夹中打开 PowerShell，执行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start_server.ps1
+```
+
+保留窗口并把最后一段错误信息发给管理员。发送截图前必须遮挡所有 API 凭据。
+
+## 安全要求
+
+- 仓库必须保持为 Private。
+- 只邀请确实需要使用工具的同事。
+- 不要提交 `schedule_data.db`、备份文件或任何真实 API 凭据。
+- 不要删除或修改 `.gitignore` 中的数据库和密钥排除规则。
+- 不要通过群聊、邮件截图或 GitHub Issue 发送 SecretId/SecretKey。
 - 曾经暴露过的 SecretId/SecretKey 必须在腾讯会议后台轮换。
-- 私有仓库只邀请得到企业授权的同事。
+- 同事离职或不再需要使用时，应及时移除仓库权限；必要时同时轮换 API 凭据。

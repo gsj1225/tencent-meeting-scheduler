@@ -883,9 +883,11 @@ async function findFreeAccounts() {
   wrap.style.display = 'block';
   picker.innerHTML = '';
 
-  data.accounts.forEach(function(account, index) {
+  data.accounts.forEach(function(acc, index) {
     var opt = document.createElement('div');
     opt.className = 'account-option';
+    var account = acc.name;
+    var edgeProfile = acc.edge_profile || '';
 
     // 检测该账号在选定时间段是否有冲突
     var conflictSched = daySchedules.find(function(s) {
@@ -902,11 +904,18 @@ async function findFreeAccounts() {
       statusClass = 'status-free';
     }
 
-    opt.innerHTML = '<span>' + (index + 1) + '. ' + account + '</span><span class="' + statusClass + '" style="font-size:12px;">' + statusText + '</span>';
+    // 如果有空教室且有Edge配置，加一个"去排课"按钮
+    var goBtn = '';
+    if (edgeProfile && !conflictSched) {
+      goBtn = '<button onclick="event.stopPropagation();openMeetingRoom(\'' + account.replace(/'/g, "\\'") + '\',\'' + edgeProfile.replace(/'/g, "\\'") + '\')" style="margin-left:6px; padding:2px 8px; font-size:11px; border:1px solid var(--primary); color:var(--primary); background:transparent; border-radius:4px; cursor:pointer; white-space:nowrap;">去排课</button>';
+    }
+
+    opt.innerHTML = '<span>' + (index + 1) + '. ' + account + goBtn + '</span><span class="' + statusClass + '" style="font-size:12px;">' + statusText + '</span>';
     opt.addEventListener('click', function() {
       picker.querySelectorAll('.account-option').forEach(function(o) { o.classList.remove('selected'); });
       opt.classList.add('selected');
       selectedAccount = account;
+      selectedAccountEdgeProfile = edgeProfile;
       document.getElementById('selectedAccountInfo').textContent = '已选择: ' + account;
     });
     picker.appendChild(opt);
@@ -932,27 +941,18 @@ async function confirmSchedule() {
   }
 
   try {
-    var needCreateMeeting = !meetingId;
-    if (needCreateMeeting) {
-      var subject = student;
-      var confirmed = confirm('是否同时在腾讯会议中创建会议？\n\n主题: ' + subject + '\n账号: ' + selectedAccount + '\n时间: ' + date + ' ' + startTime + '-' + endTime);
-      if (!confirmed) {
-        return;
+    if (selectedAccountEdgeProfile) {
+      // 有Edge配置：直接跳转到腾讯会议手动排课，不保存本地记录（记录以同步拉取为准）
+      var goNow = confirm('将打开Edge浏览器去腾讯会议手动创建会议。\n\n账号: ' + selectedAccount + '\nEdge配置: ' + selectedAccountEdgeProfile + '\n\n排课记录将通过同步自动拉取，无需手动保存。');
+      if (goNow) {
+        await openMeetingRoom(selectedAccount, selectedAccountEdgeProfile);
       }
-    }
-    var resp = await apiPost('/api/schedule/add', {
-      account: selectedAccount, date: date, startTime: startTime, endTime: endTime,
-      student: student, course: course, meetingId: meetingId, autoCreateMeeting: needCreateMeeting
-    });
-    var meetingInfo = resp.meetingId ? ' 会议号:' + resp.meetingId : '';
-    showToast('排课成功! ' + student + ' - ' + date + ' ' + startTime + '-' + endTime + ' [' + selectedAccount + ']' + meetingInfo, 'success');
-    // 如果有邀请文本，弹窗显示供复制
-    if (resp.invitation) {
-      showInvitation(resp.invitation);
+    } else {
+      showToast('该账号未配置Edge配置文件，请先在账号管理中设置', 'error');
     }
     document.getElementById('schedStudent').value = '';
-    document.getElementById('schedMeetingId').value = '';
     selectedAccount = null;
+    selectedAccountEdgeProfile = '';
     document.getElementById('selectedAccountInfo').textContent = '';
     document.getElementById('accountPickerWrap').style.display = 'none';
   } catch(e) {
@@ -966,6 +966,20 @@ function clearScheduleForm() {
   selectedAccount = null;
   document.getElementById('selectedAccountInfo').textContent = '';
   document.getElementById('accountPickerWrap').style.display = 'none';
+}
+
+// ========== Edge Profile 去排课 ==========
+async function openMeetingRoom(accountName, edgeProfile) {
+  if (!edgeProfile) {
+    showToast('该账号未配置Edge配置文件，请先在账号管理中设置', 'error');
+    return;
+  }
+  try {
+    await apiPost('/api/edge/open-meeting', { edge_profile: edgeProfile, account_name: accountName });
+    showToast('已打开Edge浏览器，请在新窗口中操作腾讯会议', 'success');
+  } catch(e) {
+    showToast(e.message, 'error');
+  }
 }
 
 // ========== Quick Add from Meeting Notice ==========
@@ -1463,7 +1477,8 @@ async function renderTimeline() {
   html += '</div></div>';
 
   // Account rows
-  data.accounts.forEach(function(account) {
+  data.accounts.forEach(function(acc) {
+    var account = typeof acc === 'string' ? acc : acc.name;
     var accountScheds = daySchedules.filter(function(s) { return s.account === account; });
     html += '<div class="timeline-row">';
     html += '<div class="timeline-label" title="' + account + '">' + account + '</div>';
@@ -1503,19 +1518,80 @@ async function renderAccounts() {
   }
 
   list.innerHTML = '';
-  data.accounts.forEach(function(account, idx) {
-    var tag = document.createElement('span');
-    tag.className = 'account-tag';
-    tag.innerHTML = '<span>' + account + '</span>';
-    var btn = document.createElement('button');
-    btn.className = 'remove';
-    btn.textContent = '\u00d7';
-    btn.title = '删除账号';
-    btn.addEventListener('click', function() { removeAccount(idx); });
-    tag.appendChild(btn);
-    list.appendChild(tag);
+  data.accounts.forEach(function(acc, idx) {
+    var name = typeof acc === 'string' ? acc : acc.name;
+    var edgeProfile = (typeof acc === 'object' && acc.edge_profile) ? acc.edge_profile : '';
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;';
+    
+    // 账号名
+    var nameSpan = document.createElement('span');
+    nameSpan.style.cssText = 'font-weight:500;min-width:100px;';
+    nameSpan.textContent = name;
+    row.appendChild(nameSpan);
+    
+    // Edge配置输入框
+    var label = document.createElement('span');
+    label.style.cssText = 'font-size:12px;color:var(--text-secondary);';
+    label.textContent = 'Edge配置:';
+    row.appendChild(label);
+    
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = '如: Profile 1';
+    input.value = edgeProfile;
+    input.dataset.accountName = name;
+    input.style.cssText = 'width:140px;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);';
+    row.appendChild(input);
+    
+    // 保存按钮
+    var saveBtn = document.createElement('button');
+    saveBtn.style.cssText = 'padding:4px 10px;font-size:11px;border:1px solid var(--primary);color:var(--primary);background:transparent;border-radius:4px;cursor:pointer;';
+    saveBtn.textContent = '保存';
+    saveBtn.addEventListener('click', function() {
+      var btnEl = saveBtn;
+      var origText = btnEl.textContent;
+      btnEl.textContent = '...';
+      btnEl.disabled = true;
+      apiPost('/api/account/update_edge_profile', { name: name, edge_profile: input.value.trim() }).then(function() {
+        showToast('Edge配置已保存', 'success');
+        btnEl.textContent = origText;
+        btnEl.disabled = false;
+        renderAccounts();
+      }).catch(function(e) {
+        showToast(e.message, 'error');
+        btnEl.textContent = origText;
+        btnEl.disabled = false;
+      });
+    });
+    row.appendChild(saveBtn);
+    
+    // 去排课按钮（如果有Edge配置）
+    var goBtn = document.createElement('button');
+    goBtn.style.cssText = 'padding:4px 10px;font-size:11px;border:1px solid ' + (edgeProfile ? 'var(--success)' : 'var(--border)') + ';color:' + (edgeProfile ? 'var(--success)' : 'var(--text-secondary)') + ';background:transparent;border-radius:4px;cursor:pointer;';
+    goBtn.textContent = '去排课';
+    if (edgeProfile) {
+      goBtn.addEventListener('click', function() { openMeetingRoom(name, edgeProfile); });
+    } else {
+      goBtn.title = '请先填写Edge配置';
+      goBtn.style.cursor = 'not-allowed';
+    }
+    row.appendChild(goBtn);
+    
+    // 删除按钮
+    var delBtn = document.createElement('button');
+    delBtn.className = 'remove';
+    delBtn.textContent = '\u00d7';
+    delBtn.title = '删除账号';
+    delBtn.style.marginLeft = '8px';
+    delBtn.addEventListener('click', function() { removeAccount(idx); });
+    row.appendChild(delBtn);
+    
+    list.appendChild(row);
   });
 }
+
+
 
 async function batchImportAccounts() {
   var text = document.getElementById('importAccounts').value.trim();
@@ -1538,7 +1614,8 @@ async function batchImportAccounts() {
 
 async function removeAccount(idx) {
   var data = await loadData();
-  var account = data.accounts[idx];
+  var acc = data.accounts[idx];
+  var account = typeof acc === 'string' ? acc : acc.name;
 
   try {
     await apiPost('/api/account/remove', { name: account });
@@ -1575,9 +1652,10 @@ async function renderRecords() {
   var currentVal = sel.value;
   sel.innerHTML = '<option value="">所有账号</option>';
   data.accounts.forEach(function(a) {
+    var name = typeof a === 'string' ? a : a.name;
     var opt = document.createElement('option');
-    opt.value = a;
-    opt.textContent = a;
+    opt.value = name;
+    opt.textContent = name;
     sel.appendChild(opt);
   });
   sel.value = currentVal;
@@ -1869,7 +1947,7 @@ async function renderStats() {
 
   // Account utilization ranking
   var accountUsage = {};
-  data.accounts.forEach(function(a) { accountUsage[a] = 0; });
+  data.accounts.forEach(function(a) { var name = typeof a === 'string' ? a : a.name; accountUsage[name] = 0; });
   data.schedules.forEach(function(s) {
     if (accountUsage[s.account] !== undefined) accountUsage[s.account]++;
   });

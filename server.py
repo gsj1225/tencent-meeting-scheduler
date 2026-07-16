@@ -23,6 +23,7 @@ import secrets
 import threading
 import webbrowser
 import requests as req_lib
+import subprocess
 
 PORT = int(os.getenv("SCHEDULE_PORT", "8080"))
 BIND_HOST = os.getenv("SCHEDULE_BIND_HOST", "0.0.0.0")
@@ -185,8 +186,14 @@ def init_db():
     c.execute('PRAGMA journal_mode=WAL')
     c.execute('''CREATE TABLE IF NOT EXISTS accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE
+        name TEXT NOT NULL UNIQUE,
+        edge_profile TEXT DEFAULT ''
     )''')
+    # 兼容旧表：如果没有edge_profile列则添加
+    try:
+        c.execute('SELECT edge_profile FROM accounts LIMIT 1')
+    except:
+        c.execute("ALTER TABLE accounts ADD COLUMN edge_profile TEXT DEFAULT ''")
     c.execute('''CREATE TABLE IF NOT EXISTS schedules (
         id TEXT PRIMARY KEY,
         account TEXT NOT NULL,
@@ -204,8 +211,8 @@ def init_db():
 def get_all_data():
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT name FROM accounts ORDER BY id')
-    accounts = [row['name'] for row in c.fetchall()]
+    c.execute('SELECT name, edge_profile FROM accounts ORDER BY id')
+    accounts = [{'name': row['name'], 'edge_profile': row['edge_profile'] or ''} for row in c.fetchall()]
     c.execute('SELECT id, account, date, start_time as startTime, end_time as endTime, student, course, meeting_id as meetingId FROM schedules ORDER BY date DESC, start_time ASC')
     schedules = [dict(row) for row in c.fetchall()]
     conn.close()
@@ -382,6 +389,10 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
             self.handle_add_accounts(body)
         elif path == '/api/account/remove':
             self.handle_remove_account(body)
+        elif path == '/api/account/update_edge_profile':
+            self.handle_update_edge_profile(body)
+        elif path == '/api/edge/open-meeting':
+            self.handle_open_edge_meeting(body)
         elif path == '/api/schedule/update':
             self.handle_update_schedule(body)
         elif path == '/api/schedule/delete':
@@ -881,6 +892,50 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
         conn.commit()
         conn.close()
         self.send_json({'success': True})
+
+    def handle_update_edge_profile(self, body):
+        name = body.get('name', '')
+        edge_profile = body.get('edge_profile', '')
+        if not name:
+            self.send_error_json('请提供账号名称')
+            return
+        
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('UPDATE accounts SET edge_profile=? WHERE name=?', (edge_profile, name))
+        conn.commit()
+        conn.close()
+        self.send_json({'success': True})
+
+    def handle_open_edge_meeting(self, body):
+        edge_profile = body.get('edge_profile', '').strip()
+        account_name = body.get('account_name', '')
+        if not edge_profile:
+            self.send_error_json('未指定Edge配置文件')
+            return
+        
+        url = 'https://meeting.tencent.com/user-center'
+        # 尝试多个可能的Edge安装路径
+        edge_paths = [
+            r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+            r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+        ]
+        edge_exe = None
+        for p in edge_paths:
+            if os.path.isfile(p):
+                edge_exe = p
+                break
+        if not edge_exe:
+            self.send_error_json('未找到Edge浏览器，请确认Edge已安装')
+            return
+        try:
+            subprocess.Popen(
+                [edge_exe, '--profile-directory=' + edge_profile, url],
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+            self.send_json({'success': True, 'message': '已打开Edge浏览器'})
+        except Exception as e:
+            self.send_error_json('打开Edge失败: ' + str(e))
 
     def handle_update_schedule(self, body):
         sched_id = body.get('id', '')

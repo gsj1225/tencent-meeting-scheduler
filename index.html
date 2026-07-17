@@ -508,7 +508,7 @@
       <div class="card-title">排课 - 查找空闲账号</div>
       <div class="paste-area">
         <div class="paste-title">&#128221; 粘贴消息，智能识别并处理</div>
-        <textarea id="pasteText" placeholder="支持两种消息类型：&#10;&#10;1. 腾讯会议通知 → 自动录入排课记录&#10;   示例：Class 5 教室 邀请您参加腾讯会议&#10;         会议主题：平翀 选课指导&#10;         会议时间：2026/07/14 17:35-18:50 ...&#10;&#10;2. 自然语言消息 → 填入表单并查找空闲教室&#10;   示例：周生翔选课指导 12号下午5点&#10;   示例：张三数学 15号14:00-15:30&#10;   示例：李四 周六上午10点 英语课"></textarea>
+        <textarea id="pasteText" placeholder="支持两种消息类型：&#10;&#10;1. 腾讯会议通知 → 自动录入排课记录&#10;   示例：Class 5 教室 邀请您参加腾讯会议&#10;         会议主题：平翀 选课指导&#10;         会议时间：2026/07/14 17:35-18:50 ...&#10;&#10;2. 自然语言消息 → 优先识别日期，再填入表单并查找空闲教室&#10;   示例：周生翔选课指导 12号下午5点&#10;   示例：张三数学 7月18日 14:00-15:30&#10;   示例：李四 周六上午10点 英语课&#10;   仅输入“12”时会识别为最近的12号，时间和主题需手动补充"></textarea>
         <button class="btn btn-primary btn-sm" onclick="smartPaste()">智能识别</button>
         <button class="btn btn-outline btn-sm" onclick="clearPasteArea()">清空</button>
         <div class="paste-result" id="parseResult"></div>
@@ -1090,35 +1090,43 @@ async function smartPaste() {
   var resultEl = document.getElementById('parseResult');
   var parsed = parseNaturalLanguage(text);
 
+  // 日期是自然语言排课的首要条件。没有日期时不沿用表单默认值，
+  // 避免把任意文字误判为一次成功识别。
+  if (!parsed.date) {
+    resultEl.textContent = '未识别到日期。请使用“12号”“7月18日”“2026-07-18”“7/18”“明天”或“周五”等格式';
+    resultEl.className = 'paste-result active';
+    resultEl.style.color = 'var(--danger)';
+    showToast('未识别到日期', 'error');
+    return;
+  }
+
   // Fill form
   var filled = [];
   if (parsed.date) { document.getElementById('schedDate').value = parsed.date; filled.push('日期(' + parsed.date + ')'); }
-  if (parsed.startTime) { document.getElementById('schedStart').value = parsed.startTime; filled.push('开始(' + parsed.startTime + ')'); }
-  if (parsed.endTime) { document.getElementById('schedEnd').value = parsed.endTime; filled.push('结束(' + parsed.endTime + ')'); }
-  if (parsed.student) { document.getElementById('schedStudent').value = parsed.student; filled.push('学生(' + parsed.student + ')'); }
+  document.getElementById('schedStart').value = parsed.startTime || '';
+  document.getElementById('schedEnd').value = parsed.endTime || '';
+  document.getElementById('schedStudent').value = '';
+  if (parsed.startTime) filled.push('开始(' + parsed.startTime + ')');
+  if (parsed.endTime) filled.push('结束(' + parsed.endTime + ')');
+  if (parsed.student) filled.push('主题(' + parsed.student + ')');
   if (parsed.student && parsed.course) {
     document.getElementById('schedStudent').value = parsed.student + ' ' + parsed.course;
   } else if (parsed.student) {
     document.getElementById('schedStudent').value = parsed.student;
   }
 
-  if (filled.length === 0) {
-    resultEl.textContent = '未能识别有效信息，请检查内容';
-    resultEl.className = 'paste-result active';
-    resultEl.style.color = 'var(--danger)';
-    showToast('识别失败', 'error');
-    return;
-  }
-
   var msg = '已识别: ' + filled.join('、');
-  if (!parsed.endTime && parsed.startTime) msg += ' (结束时间未识别，请手动补充)';
+  var missing = [];
+  if (!parsed.startTime || !parsed.endTime) missing.push('时间');
+  if (!parsed.student) missing.push('会议主题');
+  if (missing.length) msg += '；请手动补充' + missing.join('和');
   resultEl.textContent = msg;
   resultEl.className = 'paste-result active';
-  resultEl.style.color = 'var(--success)';
-  showToast('已填入表单', 'success');
+  resultEl.style.color = missing.length ? 'var(--warning)' : 'var(--success)';
+  showToast(missing.length ? '日期已识别，请补充其他信息' : '已填入表单', 'success');
 
   // Auto-search free accounts if date and time are filled
-  if (parsed.date && parsed.startTime) {
+  if (parsed.date && parsed.startTime && parsed.endTime) {
     await findFreeAccounts();
   }
 }
@@ -1135,7 +1143,7 @@ function parseNaturalLanguage(text) {
   // 中文数字转阿拉伯
   var cnNumMap = {'零':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10};
   function cnToNum(s) {
-    if (/^\\.+$/.test(s)) return parseInt(s);
+    if (/^\d+$/.test(s)) return parseInt(s);
     if (s === '十') return 10;
     if (s.indexOf('十') >= 0) {
       var parts = s.split('十');
@@ -1150,6 +1158,17 @@ function parseNaturalLanguage(text) {
   function fmtDate(y, m, d) {
     return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
   }
+  function isValidDate(y, m, d) {
+    var candidate = new Date(y, m - 1, d);
+    return candidate.getFullYear() === y && candidate.getMonth() === m - 1 && candidate.getDate() === d;
+  }
+  function futureMonthDay(m, d) {
+    var y = year;
+    var candidate = new Date(y, m - 1, d);
+    var todayStart = new Date(year, month, today);
+    if (candidate < todayStart) y += 1;
+    return isValidDate(y, m, d) ? fmtDate(y, m, d) : null;
+  }
   function pad2(n) { return String(n).padStart(2, '0'); }
   function to24h(period, hour) {
     if ((period === '下午' || period === '晚上' || period === '傍晚' || period === '晚间') && hour < 12) hour += 12;
@@ -1158,6 +1177,7 @@ function parseNaturalLanguage(text) {
   }
 
   // ---- Extract date ----
+  var bareDayMatched = false;
   // 今天/今晚
   if (/今天|今日|今晚/.test(text)) {
     result.date = fmtDate(year, month + 1, today);
@@ -1170,6 +1190,25 @@ function parseNaturalLanguage(text) {
   if (/后天/.test(text) && !result.date) {
     var d = new Date(now); d.setDate(today + 2);
     result.date = fmtDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  }
+  // YYYY-MM-DD / YYYY/MM/DD / YYYY年M月D日
+  if (!result.date) {
+    var fullDateMatch = text.match(/(\d{4})[年\/\.\-](\d{1,2})[月\/\.\-](\d{1,2})[日号]?/);
+    if (fullDateMatch) {
+      var fullYear = parseInt(fullDateMatch[1]);
+      var fullMonth = parseInt(fullDateMatch[2]);
+      var fullDay = parseInt(fullDateMatch[3]);
+      if (isValidDate(fullYear, fullMonth, fullDay)) {
+        result.date = fmtDate(fullYear, fullMonth, fullDay);
+      }
+    }
+  }
+  // M月D日 / M月D号
+  if (!result.date) {
+    var chineseMonthDayMatch = text.match(/(\d{1,2})月(\d{1,2})[日号]?/);
+    if (chineseMonthDayMatch) {
+      result.date = futureMonthDay(parseInt(chineseMonthDayMatch[1]), parseInt(chineseMonthDayMatch[2]));
+    }
   }
   // X号, X日
   if (!result.date) {
@@ -1198,7 +1237,27 @@ function parseNaturalLanguage(text) {
   if (!result.date) {
     var mdMatch = text.match(/(\d{1,2})[\/\.](\d{1,2})/);
     if (mdMatch) {
-      result.date = fmtDate(year, parseInt(mdMatch[1]), parseInt(mdMatch[2]));
+      result.date = futureMonthDay(parseInt(mdMatch[1]), parseInt(mdMatch[2]));
+    }
+  }
+  // 只有一个1-31的数字时，优先按“几号”处理。
+  if (!result.date) {
+    var bareDayMatch = text.match(/^\s*([1-9]|[12]\d|3[01])\s*$/);
+    if (bareDayMatch) {
+      var bareDay = parseInt(bareDayMatch[1]);
+      var bareMonth = month;
+      var bareYear = year;
+      if (bareDay < today) {
+        bareMonth += 1;
+        if (bareMonth > 11) {
+          bareMonth = 0;
+          bareYear += 1;
+        }
+      }
+      if (isValidDate(bareYear, bareMonth + 1, bareDay)) {
+        result.date = fmtDate(bareYear, bareMonth + 1, bareDay);
+        bareDayMatched = true;
+      }
     }
   }
 
@@ -1408,6 +1467,8 @@ function parseNaturalLanguage(text) {
   var numP = '(?:\\d{1,2}|[零一二两三四五六七八九十]+)';
   var cleanText = text
     .replace(/今天|今日|今晚|明天|明日|明晚|明早|后天/g, '')
+    .replace(/\d{4}[年\/\.\-]\d{1,2}[月\/\.\-]\d{1,2}[日号]?/g, '')
+    .replace(/\d{1,2}月\d{1,2}[日号]?/g, '')
     .replace(new RegExp('(' + numP + ')[号日]', 'g'), '')
     .replace(/周[一二三四五六日天]/g, '')
     .replace(/(\d{1,2})[\/\.](\d{1,2})/g, '')
@@ -1426,6 +1487,8 @@ function parseNaturalLanguage(text) {
     .replace(/半小时/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+  if (bareDayMatched) cleanText = '';
 
   if (cleanText) {
     // 会议主题就是清理后的整个文本，不再拆分学生和课程

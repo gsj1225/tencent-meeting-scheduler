@@ -508,7 +508,7 @@
       <div class="card-title">排课 - 查找空闲账号</div>
       <div class="paste-area">
         <div class="paste-title">&#128221; 粘贴消息，智能识别并处理</div>
-        <textarea id="pasteText" placeholder="支持两种消息类型：&#10;&#10;1. 腾讯会议通知 → 自动录入排课记录&#10;   示例：Class 5 教室 邀请您参加腾讯会议&#10;         会议主题：平翀 选课指导&#10;         会议时间：2026/07/14 17:35-18:50 ...&#10;&#10;2. 自然语言消息 → 优先识别日期，再填入表单并查找空闲教室&#10;   示例：周生翔选课指导 12号下午5点&#10;   示例：张三数学 7月18日 14:00-15:30&#10;   示例：李四 周六上午10点 英语课&#10;   仅输入“12”时会识别为最近的12号，时间和主题需手动补充"></textarea>
+        <textarea id="pasteText" placeholder="支持两种消息类型：&#10;&#10;1. 腾讯会议通知 → 自动录入排课记录&#10;   示例：Class 5 教室 邀请您参加腾讯会议&#10;         会议主题：平翀 选课指导&#10;         会议时间：2026/07/14 17:35-18:50 ...&#10;&#10;2. 日期时间消息 → 识别时间并查找空闲教室&#10;   示例：12号下午5点&#10;   示例：7月18日 14:00-15:30&#10;   示例：周六上午10点&#10;   示例：晚上18:00-19:00（沿用页面当前日期）&#10;   仅输入“12”时会识别为最近的12号，时间需手动补充"></textarea>
         <button class="btn btn-primary btn-sm" onclick="smartPaste()">智能识别</button>
         <button class="btn btn-outline btn-sm" onclick="clearPasteArea()">清空</button>
         <div class="paste-result" id="parseResult"></div>
@@ -525,10 +525,6 @@
         <div class="form-group">
           <label>结束时间</label>
           <input type="time" id="schedEnd" step="900" value="15:00" onchange="findFreeAccounts()">
-        </div>
-        <div class="form-group">
-          <label>会议主题 *</label>
-          <input type="text" id="schedStudent" placeholder="输入会议主题">
         </div>
         <div class="form-group">
           <label>会议号</label>
@@ -697,6 +693,7 @@
       <h2 style="margin:0;">回放信息</h2>
       <button class="modal-close" onclick="closePlayback()">&times;</button>
     </div>
+    <div id="playbackMeta" style="display:none;margin-bottom:10px;padding:9px 12px;background:var(--primary-light);color:var(--primary);border-radius:var(--radius);font-size:13px;"></div>
     <textarea id="playbackText" readonly style="width:100%;min-height:120px;font-size:14px;font-family:inherit;padding:12px;border:1px solid var(--border);border-radius:var(--radius);resize:vertical;line-height:1.6;"></textarea>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
       <button class="btn btn-primary" onclick="copyPlayback()">复制回放信息</button>
@@ -926,14 +923,11 @@ async function confirmSchedule() {
   var date = document.getElementById('schedDate').value;
   var startTime = document.getElementById('schedStart').value;
   var endTime = document.getElementById('schedEnd').value;
-  var student = document.getElementById('schedStudent').value.trim();
-  var course = '';
   var meetingId = document.getElementById('schedMeetingId').value.trim();
 
   if (!date) { showToast('请选择日期', 'error'); return; }
   if (!startTime || !endTime) { showToast('请填写起止时间', 'error'); return; }
   if (timeToMinutes(endTime) <= timeToMinutes(startTime)) { showToast('结束时间必须大于开始时间', 'error'); return; }
-  if (!student) { showToast('请填写学生姓名', 'error'); return; }
   if (!selectedAccount) {
     showToast('请先选择教室', 'error');
     await findFreeAccounts();
@@ -950,7 +944,6 @@ async function confirmSchedule() {
     } else {
       showToast('该账号未配置Edge配置文件，请先在账号管理中设置', 'error');
     }
-    document.getElementById('schedStudent').value = '';
     selectedAccount = null;
     selectedAccountEdgeProfile = '';
     document.getElementById('selectedAccountInfo').textContent = '';
@@ -961,7 +954,6 @@ async function confirmSchedule() {
 }
 
 function clearScheduleForm() {
-  document.getElementById('schedStudent').value = '';
   document.getElementById('schedMeetingId').value = '';
   selectedAccount = null;
   document.getElementById('selectedAccountInfo').textContent = '';
@@ -1090,9 +1082,11 @@ async function smartPaste() {
   var resultEl = document.getElementById('parseResult');
   var parsed = parseNaturalLanguage(text);
 
-  // 日期是自然语言排课的首要条件。没有日期时不沿用表单默认值，
-  // 避免把任意文字误判为一次成功识别。
-  if (!parsed.date) {
+  // 消息中有日期时使用识别结果；只输入时间时沿用表单当前日期。
+  // 两处都没有日期才停止，避免时间已经识别却没有触发重新匹配。
+  var currentDate = document.getElementById('schedDate').value;
+  var effectiveDate = parsed.date || currentDate;
+  if (!effectiveDate) {
     resultEl.textContent = '未识别到日期。请使用“12号”“7月18日”“2026-07-18”“7/18”“明天”或“周五”等格式';
     resultEl.className = 'paste-result active';
     resultEl.style.color = 'var(--danger)';
@@ -1102,39 +1096,34 @@ async function smartPaste() {
 
   // Fill form
   var filled = [];
-  if (parsed.date) { document.getElementById('schedDate').value = parsed.date; filled.push('日期(' + parsed.date + ')'); }
+  document.getElementById('schedDate').value = effectiveDate;
+  filled.push(parsed.date ? '日期(' + parsed.date + ')' : '日期(沿用 ' + effectiveDate + ')');
   document.getElementById('schedStart').value = parsed.startTime || '';
   document.getElementById('schedEnd').value = parsed.endTime || '';
-  document.getElementById('schedStudent').value = '';
   if (parsed.startTime) filled.push('开始(' + parsed.startTime + ')');
   if (parsed.endTime) filled.push('结束(' + parsed.endTime + ')');
-  if (parsed.student) filled.push('主题(' + parsed.student + ')');
-  if (parsed.student && parsed.course) {
-    document.getElementById('schedStudent').value = parsed.student + ' ' + parsed.course;
-  } else if (parsed.student) {
-    document.getElementById('schedStudent').value = parsed.student;
-  }
 
   var msg = '已识别: ' + filled.join('、');
   var missing = [];
   if (!parsed.startTime || !parsed.endTime) missing.push('时间');
-  if (!parsed.student) missing.push('会议主题');
-  if (missing.length) msg += '；请手动补充' + missing.join('和');
+  if (missing.length) msg += '；请手动补充时间';
   resultEl.textContent = msg;
   resultEl.className = 'paste-result active';
   resultEl.style.color = missing.length ? 'var(--warning)' : 'var(--success)';
-  showToast(missing.length ? '日期已识别，请补充其他信息' : '已填入表单', 'success');
+  showToast(missing.length ? '日期已识别，请补充时间' : '日期和时间已识别', 'success');
 
   // Auto-search free accounts if date and time are filled
-  if (parsed.date && parsed.startTime && parsed.endTime) {
+  if (effectiveDate && parsed.startTime && parsed.endTime) {
     await findFreeAccounts();
   }
 }
 
 function parseNaturalLanguage(text) {
+  // 统一微信等消息中常见的全角标点，避免时间范围只识别到起始时间。
+  text = text.replace(/：/g, ':').replace(/[－—–～]/g, '-');
   // 展开组合词，让时间正则能正确匹配时间段前缀
   text = text.replace(/明晚/g, '明天晚上').replace(/今晚/g, '今天晚上').replace(/明早/g, '明天早上').replace(/昨晚/g, '昨天晚上');
-  var result = { date: null, startTime: null, endTime: null, student: null, course: null };
+  var result = { date: null, startTime: null, endTime: null };
   var now = new Date();
   var year = now.getFullYear();
   var month = now.getMonth();
@@ -1177,7 +1166,6 @@ function parseNaturalLanguage(text) {
   }
 
   // ---- Extract date ----
-  var bareDayMatched = false;
   // 今天/今晚
   if (/今天|今日|今晚/.test(text)) {
     result.date = fmtDate(year, month + 1, today);
@@ -1256,7 +1244,6 @@ function parseNaturalLanguage(text) {
       }
       if (isValidDate(bareYear, bareMonth + 1, bareDay)) {
         result.date = fmtDate(bareYear, bareMonth + 1, bareDay);
-        bareDayMatched = true;
       }
     }
   }
@@ -1460,40 +1447,6 @@ function parseNaturalLanguage(text) {
       }
       }
     }
-  }
-
-  // ---- Extract subject (会议主题) ----
-  // 移除所有日期、时间相关的文本，剩下的就是会议主题
-  var numP = '(?:\\d{1,2}|[零一二两三四五六七八九十]+)';
-  var cleanText = text
-    .replace(/今天|今日|今晚|明天|明日|明晚|明早|后天/g, '')
-    .replace(/\d{4}[年\/\.\-]\d{1,2}[月\/\.\-]\d{1,2}[日号]?/g, '')
-    .replace(/\d{1,2}月\d{1,2}[日号]?/g, '')
-    .replace(new RegExp('(' + numP + ')[号日]', 'g'), '')
-    .replace(/周[一二三四五六日天]/g, '')
-    .replace(/(\d{1,2})[\/\.](\d{1,2})/g, '')
-    // 先移除混合格式范围（X点到Y:MM 或 X:MM到Y点）
-    .replace(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')点\\s*[到至~-]\\s*(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + '):(\\d{1,2})', 'g'), '')
-    .replace(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + '):(\\d{1,2})\\s*[到至~-]\\s*(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')点(半)?', 'g'), '')
-    .replace(/(\d{1,2}):(\d{2})/g, '')
-    .replace(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')点半', 'g'), '')
-    .replace(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')[点时:：](\\d{1,2})?\\s*分?\\s*[到至~-]\\s*(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')[点时:：](\\d{1,2})?\\s*分?', 'g'), '')
-    .replace(new RegExp('(上午|早上|中午|下午|晚上|傍晚|间)?\\s*(' + numP + ')[点时:：](\\d{1,2})?\\s*分?', 'g'), '')
-    .replace(new RegExp('(' + numP + ')点(?!半)', 'g'), '')
-    .replace(/[-~至到]/g, '')
-    .replace(/北京时间|中国标准时间|GMT\+08:?00/g, '')
-    .replace(/\d+(\.\d+)?\s*(h|H|小时|个小时)/g, '')
-    .replace(/([零一二两三四五六七八九十]+\s*个?\s*小时)/g, '')
-    .replace(/半小时/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (bareDayMatched) cleanText = '';
-
-  if (cleanText) {
-    // 会议主题就是清理后的整个文本，不再拆分学生和课程
-    result.student = cleanText;
-    result.course = '';
   }
 
   return result;
@@ -1854,6 +1807,26 @@ async function queryPlayback() {
     var text = '录制: ' + resp.subject + '\n';
     text += '日期: ' + resp.recordTime + '\n';
     text += '录制文件：' + resp.playbackUrl;
+
+    var metaParts = [];
+    if (Number(resp.recordCount) > 0) {
+      metaParts.push('检测到 ' + Number(resp.recordCount) + ' 个回放' +
+        (Number(resp.recordCount) > 1 ? '，已自动选择最长的一条' : ''));
+    }
+    if (Number(resp.durationSeconds) > 0) {
+      var durationSeconds = Number(resp.durationSeconds);
+      var durationHours = Math.floor(durationSeconds / 3600);
+      var durationMinutes = Math.floor((durationSeconds % 3600) / 60);
+      var durationRemainSeconds = Math.floor(durationSeconds % 60);
+      metaParts.push('所选时长 ' +
+        String(durationHours).padStart(2, '0') + ':' +
+        String(durationMinutes).padStart(2, '0') + ':' +
+        String(durationRemainSeconds).padStart(2, '0'));
+    }
+
+    var metaEl = document.getElementById('playbackMeta');
+    metaEl.textContent = metaParts.join('；');
+    metaEl.style.display = metaParts.length ? 'block' : 'none';
     document.getElementById('playbackText').value = text;
     document.getElementById('playbackModal').classList.add('active');
   } catch(e) {

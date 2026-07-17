@@ -171,6 +171,56 @@ def create_tencent_meeting(account_name, subject, start_ts, end_ts):
         except:
             return {'error': f'创建会议失败: HTTP {resp.status_code}'}
 
+def _safe_nonnegative_int(value):
+    """将腾讯会议接口中的数字字段安全转换为非负整数。"""
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+def _select_longest_recording(record_meetings):
+    """从多条会议录制中选择时长最长的文件。"""
+    candidates = []
+    seen_files = set()
+
+    for meeting in record_meetings:
+        for record_file in meeting.get("record_files", []) or []:
+            start_ms = _safe_nonnegative_int(record_file.get("record_start_time"))
+            end_ms = _safe_nonnegative_int(record_file.get("record_end_time"))
+            duration_ms = max(0, end_ms - start_ms)
+            record_size = _safe_nonnegative_int(record_file.get("record_size"))
+            sharing_url = str(record_file.get("sharing_url", "") or "").strip()
+            file_key = (
+                str(record_file.get("record_file_id", "") or ""),
+                sharing_url,
+                start_ms,
+                end_ms,
+            )
+            if file_key in seen_files:
+                continue
+            seen_files.add(file_key)
+            candidates.append({
+                "meeting": meeting,
+                "file": record_file,
+                "duration_ms": duration_ms,
+                "record_size": record_size,
+                "sharing_url": sharing_url,
+            })
+
+    if not candidates:
+        return None, 0
+
+    # 正常情况下用起止时间计算时长；接口未返回时间时，用文件大小作为后备判断。
+    selected = max(
+        candidates,
+        key=lambda item: (
+            item["duration_ms"],
+            item["record_size"],
+            _safe_nonnegative_int(item["file"].get("record_end_time")),
+        ),
+    )
+    return selected, len(candidates)
+
 # ========== Database ==========
 def get_db():
     conn = sqlite3.connect(DB_FILE, timeout=10)
@@ -699,35 +749,50 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
             from concurrent.futures import ThreadPoolExecutor, as_completed
             
             def query_user_records(uid):
-                uri = f"/v1/records?meeting_code={meeting_code_clean}&userid={uid}&start_time={start_ts}&end_time={now_ts}&page_size=20&page=1"
-                resp = _tc_get(uri)
-                if resp.status_code != 200:
-                    return None
-                data = resp.json()
-                records = data.get("record_meetings", [])
-                if not records:
-                    return None
-                return records[0]
+                user_records = []
+                page = 1
+                while True:
+                    uri = f"/v1/records?meeting_code={meeting_code_clean}&userid={uid}&start_time={start_ts}&end_time={now_ts}&page_size=20&page={page}"
+                    resp = _tc_get(uri)
+                    if resp.status_code != 200:
+                        break
+                    data = resp.json()
+                    records = data.get("record_meetings", []) or []
+                    for record in records:
+                        returned_code = str(record.get("meeting_code", "") or "").replace("-", "").replace(" ", "")
+                        if returned_code == meeting_code_clean:
+                            user_records.append(record)
+                    total_page = _safe_nonnegative_int(data.get("total_page"))
+                    if not records or (total_page and page >= total_page) or (not total_page and len(records) < 20):
+                        break
+                    page += 1
+                return user_records
             
-            found_record = None
+            all_records = []
             with ThreadPoolExecutor(max_workers=10) as executor:
                 futures = {executor.submit(query_user_records, uid): uid for uid in _account_userid_map.values()}
                 for f in as_completed(futures):
                     try:
                         result = f.result()
                         if result:
-                            found_record = result
-                            break
-                    except:
+                            all_records.extend(result)
+                    except Exception:
                         pass
             
-            if not found_record:
+            if not all_records:
                 self.send_json({'error': '未找到该会议号的录制，可能未开启云录制或会议号有误'})
                 return
+
+            selected, record_count = _select_longest_recording(all_records)
+            if not selected:
+                self.send_json({'error': '已找到会议录制，但没有可用的录制文件'})
+                return
             
+            found_record = selected["meeting"]
+            selected_file = selected["file"]
             subject = found_record.get("subject", "")
             record_time = ''
-            media_start = found_record.get("media_start_time", 0)
+            media_start = selected_file.get("record_start_time") or found_record.get("media_start_time", 0)
             if media_start:
                 try:
                     from datetime import datetime
@@ -736,19 +801,19 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
                 except:
                     record_time = str(media_start)
             
-            playback_url = ''
-            record_files = found_record.get("record_files", [])
-            if record_files:
-                playback_url = record_files[0].get("sharing_url", "")
-            
+            playback_url = selected["sharing_url"]
             if not playback_url:
-                self.send_json({'error': '录制文件存在但未开启共享，请在腾讯会议中开启共享'})
+                self.send_json({'error': '已找到最长的录制文件，但该文件尚未开启共享，请在腾讯会议中开启共享后重试'})
                 return
             
             self.send_json({
                 'subject': subject,
                 'recordTime': record_time,
-                'playbackUrl': playback_url
+                'playbackUrl': playback_url,
+                'durationSeconds': selected["duration_ms"] // 1000,
+                'recordSize': selected["record_size"],
+                'recordCount': record_count,
+                'selection': 'longest'
             })
         except Exception as e:
             self.send_error_json(f'查询回放失败: {str(e)}')

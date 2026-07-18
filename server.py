@@ -266,6 +266,123 @@ def get_all_data():
     conn.close()
     return {'accounts': accounts, 'schedules': schedules}
 
+def _normalize_meeting_code(code):
+    """统一会议号格式，兼容数据库中的空格和连字符。"""
+    return str(code or '').replace('-', '').replace(' ', '').strip()
+
+def _upsert_synced_meetings(conn, all_meetings):
+    """将腾讯会议数据写入本地；已有会议也同步更新改期、换教室等变化。"""
+    from datetime import datetime
+    import uuid
+
+    c = conn.cursor()
+    c.execute(
+        'SELECT id, account, date, start_time, end_time, course, meeting_id '
+        'FROM schedules WHERE meeting_id != ""'
+    )
+    existing_by_code = {}
+    for row in c.fetchall():
+        normalized = _normalize_meeting_code(row['meeting_id'])
+        if normalized:
+            existing_by_code.setdefault(normalized, []).append(row)
+
+    new_count = 0
+    updated_count = 0
+    remote_codes = set()
+
+    for meeting in all_meetings:
+        code = str(meeting.get('meeting_code', '') or '').strip()
+        normalized_code = _normalize_meeting_code(code)
+        if not normalized_code:
+            continue
+        remote_codes.add(normalized_code)
+
+        try:
+            start_dt = datetime.fromtimestamp(int(meeting.get('start_time', 0)))
+            end_dt = datetime.fromtimestamp(int(meeting.get('end_time', 0)))
+        except (TypeError, ValueError, OSError, OverflowError):
+            continue
+
+        date_str = start_dt.strftime('%Y-%m-%d')
+        start_str = start_dt.strftime('%H:%M')
+        end_str = end_dt.strftime('%H:%M')
+        account_name = str(meeting.get('account_name', '') or '').strip()
+        subject = str(meeting.get('subject', '') or '')
+        if not account_name:
+            continue
+
+        c.execute('SELECT id FROM accounts WHERE name=?', (account_name,))
+        if not c.fetchone():
+            c.execute('INSERT INTO accounts (name) VALUES (?)', (account_name,))
+
+        local_rows = existing_by_code.get(normalized_code, [])
+        if local_rows:
+            meeting_changed = False
+            for row in local_rows:
+                old_values = (
+                    row['account'],
+                    row['date'],
+                    row['start_time'],
+                    row['end_time'],
+                    row['course'] or '',
+                    _normalize_meeting_code(row['meeting_id']),
+                )
+                new_values = (
+                    account_name,
+                    date_str,
+                    start_str,
+                    end_str,
+                    subject,
+                    normalized_code,
+                )
+                if old_values != new_values:
+                    c.execute(
+                        'UPDATE schedules SET account=?, date=?, start_time=?, end_time=?, '
+                        'course=?, meeting_id=? WHERE id=?',
+                        (*new_values, row['id']),
+                    )
+                    meeting_changed = True
+            if meeting_changed:
+                updated_count += 1
+            continue
+
+        schedule_id = str(int(time.time() * 1000)) + uuid.uuid4().hex[:6]
+        c.execute(
+            'INSERT INTO schedules '
+            '(id, account, date, start_time, end_time, student, course, meeting_id) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (
+                schedule_id,
+                account_name,
+                date_str,
+                start_str,
+                end_str,
+                '',
+                subject,
+                normalized_code,
+            ),
+        )
+        c.execute(
+            'SELECT id, account, date, start_time, end_time, course, meeting_id '
+            'FROM schedules WHERE id=?',
+            (schedule_id,),
+        )
+        existing_by_code[normalized_code] = [c.fetchone()]
+        new_count += 1
+
+    c.execute('SELECT id, meeting_id FROM schedules WHERE meeting_id != ""')
+    deleted_count = 0
+    for row in c.fetchall():
+        if _normalize_meeting_code(row['meeting_id']) not in remote_codes:
+            c.execute('DELETE FROM schedules WHERE id=?', (row['id'],))
+            deleted_count += 1
+
+    return {
+        'new_meetings': new_count,
+        'updated_meetings': updated_count,
+        'deleted_meetings': deleted_count,
+    }
+
 # ========== API Handler ==========
 class ScheduleHandler(SimpleHTTPRequestHandler):
     
@@ -426,7 +543,7 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
         elif path == '/api/tencent/create-meeting':
             self.handle_create_meeting(body)
         elif path == '/api/tencent/sync':
-            self.handle_sync_meetings()
+            self.handle_sync_meetings(body)
         elif path == '/api/tencent/playback':
             self.handle_query_playback(body)
         elif path == '/api/tencent/cancel-meeting':
@@ -579,12 +696,13 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
     _last_sync_result = None
     _SYNC_CACHE_SECONDS = 300  # 5分钟缓存
 
-    def handle_sync_meetings(self):
+    def handle_sync_meetings(self, body=None):
         """从腾讯会议API同步最新会议数据到数据库"""
         try:
+            force_sync = bool((body or {}).get('force'))
             # 检查缓存：5分钟内不重复同步
             now_ts = time.time()
-            if self._last_sync_result and (now_ts - self._last_sync_time) < self._SYNC_CACHE_SECONDS:
+            if not force_sync and self._last_sync_result and (now_ts - self._last_sync_time) < self._SYNC_CACHE_SECONDS:
                 cached = self._last_sync_result.copy()
                 cached['cached'] = True
                 self.send_json(cached)
@@ -643,55 +761,14 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
                     raise RuntimeError(preview)
                 
                 conn = get_db()
-                c = conn.cursor()
-                c.execute('SELECT meeting_id FROM schedules')
-                existing_codes = set(row[0] for row in c.fetchall() if row[0])
-                
-                from datetime import datetime
-                new_count = 0
-                for m in all_meetings:
-                    code = m["meeting_code"]
-                    if code in existing_codes:
-                        continue
-                    try:
-                        start_ts = int(m["start_time"])
-                        end_ts = int(m["end_time"])
-                        start_dt = datetime.fromtimestamp(start_ts)
-                        end_dt = datetime.fromtimestamp(end_ts)
-                        date_str = start_dt.strftime("%Y-%m-%d")
-                        start_str = start_dt.strftime("%H:%M")
-                        end_str = end_dt.strftime("%H:%M")
-                    except:
-                        continue
-                    
-                    acc_name = m["account_name"]
-                    c.execute('SELECT id FROM accounts WHERE name=?', (acc_name,))
-                    if not c.fetchone():
-                        c.execute('INSERT INTO accounts (name) VALUES (?)', (acc_name,))
-                    
-                    import uuid
-                    sched_id = str(int(time.time()*1000)) + uuid.uuid4().hex[:6]
-                    c.execute(
-                        'INSERT INTO schedules (id, account, date, start_time, end_time, student, course, meeting_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                        (sched_id, acc_name, date_str, start_str, end_str, '', m['subject'], code)
-                    )
-                    existing_codes.add(code)
-                    new_count += 1
-                
-                remote_codes = set(m['meeting_code'] for m in all_meetings)
-                c.execute('SELECT id, meeting_id FROM schedules WHERE meeting_id != ""')
-                local_records = c.fetchall()
-                deleted_count = 0
-                for row in local_records:
-                    local_code = row[1]
-                    local_code_clean = local_code.replace('-', '')
-                    if local_code not in remote_codes and local_code_clean not in remote_codes:
-                        c.execute('DELETE FROM schedules WHERE id=?', (row[0],))
-                        deleted_count += 1
-                
+                sync_counts = _upsert_synced_meetings(conn, all_meetings)
                 conn.commit()
                 conn.close()
-                result = {'success': True, 'new_meetings': new_count, 'deleted_meetings': deleted_count, 'total': len(all_meetings)}
+                result = {
+                    'success': True,
+                    **sync_counts,
+                    'total': len(all_meetings),
+                }
                 self._last_sync_time = time.time()
                 self._last_sync_result = result
                 self.send_json(result)

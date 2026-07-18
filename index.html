@@ -422,8 +422,8 @@
   /* Confirm dialog */
   /* Paste area */
   .paste-area {
-    margin-bottom: 20px;
-    padding: 16px;
+    margin-bottom: 16px;
+    padding: 12px;
     background: var(--primary-light);
     border: 1px dashed var(--primary);
     border-radius: var(--radius);
@@ -439,13 +439,14 @@
   }
   .paste-area textarea {
     width: 100%;
-    padding: 10px 12px;
+    padding: 8px 10px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     font-size: 13px;
     font-family: inherit;
     resize: vertical;
-    height: 260px;
+    height: 150px;
+    min-height: 100px;
     outline: none;
     margin-bottom: 8px;
   }
@@ -508,7 +509,7 @@
       <div class="card-title">排课 - 查找空闲账号</div>
       <div class="paste-area">
         <div class="paste-title">&#128221; 粘贴消息，智能识别并处理</div>
-        <textarea id="pasteText" placeholder="支持两种消息类型：&#10;&#10;1. 腾讯会议通知 → 自动录入排课记录&#10;   示例：Class 5 教室 邀请您参加腾讯会议&#10;         会议主题：平翀 选课指导&#10;         会议时间：2026/07/14 17:35-18:50 ...&#10;&#10;2. 日期时间消息 → 识别时间并查找空闲教室&#10;   示例：12号下午5点&#10;   示例：7月18日 14:00-15:30&#10;   示例：周六上午10点&#10;   示例：晚上18:00-19:00（沿用页面当前日期）&#10;   仅输入“12”时会识别为最近的12号，时间需手动补充"></textarea>
+        <textarea id="pasteText" placeholder="输入需要排课的信息"></textarea>
         <button class="btn btn-primary btn-sm" onclick="smartPaste()">智能识别</button>
         <button class="btn btn-outline btn-sm" onclick="clearPasteArea()">清空</button>
         <div class="paste-result" id="parseResult"></div>
@@ -516,19 +517,19 @@
       <div class="form-grid">
         <div class="form-group">
           <label>日期</label>
-          <input type="date" id="schedDate" onchange="findFreeAccounts()">
+          <input type="date" id="schedDate" onchange="invalidateFreeAccountResults()">
         </div>
         <div class="form-group">
           <label>开始时间</label>
-          <input type="time" id="schedStart" step="900" value="14:00" onchange="findFreeAccounts()">
+          <input type="time" id="schedStart" step="900" value="14:00" oninput="invalidateFreeAccountResults()">
         </div>
         <div class="form-group">
           <label>结束时间</label>
-          <input type="time" id="schedEnd" step="900" value="15:00" onchange="findFreeAccounts()">
+          <input type="time" id="schedEnd" step="900" value="15:00" oninput="invalidateFreeAccountResults()">
         </div>
         <div class="form-group">
-          <label>会议号</label>
-          <input type="text" id="schedMeetingId" placeholder="选填">
+          <label>&nbsp;</label>
+          <button type="button" class="btn btn-primary" id="queryFreeBtn" onclick="findFreeAccounts()" style="width:100%;height:38px;">查询空闲教室</button>
         </div>
       </div>
       <div id="accountPickerWrap" style="margin-top:12px; display:none;">
@@ -820,6 +821,15 @@ document.querySelectorAll('.tab').forEach(function(tab) {
 
 // ========== Schedule Page ==========
 let selectedAccount = null;
+let selectedAccountEdgeProfile = '';
+
+function invalidateFreeAccountResults() {
+  selectedAccount = null;
+  selectedAccountEdgeProfile = '';
+  document.getElementById('selectedAccountInfo').textContent = '';
+  document.getElementById('accountPicker').innerHTML = '';
+  document.getElementById('accountPickerWrap').style.display = 'none';
+}
 
 function setDefaultDate() {
   const today = new Date();
@@ -846,7 +856,10 @@ async function findFreeAccounts() {
   const startTime = document.getElementById('schedStart').value;
   const endTime = document.getElementById('schedEnd').value;
 
-  if (!date || !startTime || !endTime) return;
+  if (!date || !startTime || !endTime) {
+    showToast('请先填写日期、开始时间和结束时间', 'error');
+    return;
+  }
   if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
     showToast('结束时间必须大于开始时间', 'error');
     return;
@@ -856,8 +869,11 @@ async function findFreeAccounts() {
   showToast('正在同步最新会议数据...', 'info');
   try {
     var syncResp = await apiPost('/api/tencent/sync', {});
-    if (syncResp.new_meetings > 0) {
-      showToast('已同步 ' + syncResp.new_meetings + ' 条新会议', 'success');
+    if (syncResp.new_meetings > 0 || syncResp.updated_meetings > 0) {
+      var syncSummary = [];
+      if (syncResp.new_meetings > 0) syncSummary.push('新增 ' + syncResp.new_meetings + ' 条');
+      if (syncResp.updated_meetings > 0) syncSummary.push('更新 ' + syncResp.updated_meetings + ' 条');
+      showToast('同步完成：' + syncSummary.join('，'), 'success');
     } else {
       showToast('同步完成', 'success');
     }
@@ -923,14 +939,12 @@ async function confirmSchedule() {
   var date = document.getElementById('schedDate').value;
   var startTime = document.getElementById('schedStart').value;
   var endTime = document.getElementById('schedEnd').value;
-  var meetingId = document.getElementById('schedMeetingId').value.trim();
 
   if (!date) { showToast('请选择日期', 'error'); return; }
   if (!startTime || !endTime) { showToast('请填写起止时间', 'error'); return; }
   if (timeToMinutes(endTime) <= timeToMinutes(startTime)) { showToast('结束时间必须大于开始时间', 'error'); return; }
   if (!selectedAccount) {
-    showToast('请先选择教室', 'error');
-    await findFreeAccounts();
+    showToast('请先点击“查询空闲教室”并选择教室', 'error');
     return;
   }
 
@@ -954,10 +968,7 @@ async function confirmSchedule() {
 }
 
 function clearScheduleForm() {
-  document.getElementById('schedMeetingId').value = '';
-  selectedAccount = null;
-  document.getElementById('selectedAccountInfo').textContent = '';
-  document.getElementById('accountPickerWrap').style.display = 'none';
+  invalidateFreeAccountResults();
 }
 
 // ========== Edge Profile 去排课 ==========
@@ -1100,6 +1111,7 @@ async function smartPaste() {
   filled.push(parsed.date ? '日期(' + parsed.date + ')' : '日期(沿用 ' + effectiveDate + ')');
   document.getElementById('schedStart').value = parsed.startTime || '';
   document.getElementById('schedEnd').value = parsed.endTime || '';
+  invalidateFreeAccountResults();
   if (parsed.startTime) filled.push('开始(' + parsed.startTime + ')');
   if (parsed.endTime) filled.push('结束(' + parsed.endTime + ')');
 
@@ -1107,15 +1119,11 @@ async function smartPaste() {
   var missing = [];
   if (!parsed.startTime || !parsed.endTime) missing.push('时间');
   if (missing.length) msg += '；请手动补充时间';
+  else msg += '；请点击“查询空闲教室”';
   resultEl.textContent = msg;
   resultEl.className = 'paste-result active';
   resultEl.style.color = missing.length ? 'var(--warning)' : 'var(--success)';
-  showToast(missing.length ? '日期已识别，请补充时间' : '日期和时间已识别', 'success');
-
-  // Auto-search free accounts if date and time are filled
-  if (effectiveDate && parsed.startTime && parsed.endTime) {
-    await findFreeAccounts();
-  }
+  showToast(missing.length ? '日期已识别，请补充时间' : '日期和时间已识别，请点击查询', 'success');
 }
 
 function parseNaturalLanguage(text) {
@@ -2017,9 +2025,10 @@ async function syncTencentData() {
   btn.textContent = '同步中...';
   showToast('正在从腾讯会议同步数据，请稍候...', 'info');
   try {
-    var resp = await apiPost('/api/tencent/sync', {});
+    var resp = await apiPost('/api/tencent/sync', { force: true });
     var msg = '同步完成';
     if (resp.new_meetings > 0) msg += '，新增 ' + resp.new_meetings + ' 条';
+    if (resp.updated_meetings > 0) msg += '，更新 ' + resp.updated_meetings + ' 条';
     if (resp.deleted_meetings > 0) msg += '，删除 ' + resp.deleted_meetings + ' 条';
     showToast(msg, 'success');
     // 刷新当前页面
@@ -2091,8 +2100,6 @@ function handleImport(event) {
 (async function init() {
   setDefaultDate();
   await renderAccounts();
-  // 页面加载后自动展示教室空闲状态
-  findFreeAccounts();
 })();
 </script>
 </body>

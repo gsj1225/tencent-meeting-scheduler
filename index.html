@@ -1545,6 +1545,7 @@ async function renderAccounts() {
   data.accounts.forEach(function(acc, idx) {
     var name = typeof acc === 'string' ? acc : acc.name;
     var edgeProfile = (typeof acc === 'object' && acc.edge_profile) ? acc.edge_profile : '';
+    var mcpToken = (typeof acc === 'object' && acc.mcp_token) ? acc.mcp_token : '';
     var row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;';
     
@@ -1555,18 +1556,30 @@ async function renderAccounts() {
     row.appendChild(nameSpan);
     
     // Edge配置输入框
-    var label = document.createElement('span');
-    label.style.cssText = 'font-size:12px;color:var(--text-secondary);';
-    label.textContent = 'Edge配置:';
-    row.appendChild(label);
+    var label1 = document.createElement('span');
+    label1.style.cssText = 'font-size:12px;color:var(--text-secondary);';
+    label1.textContent = 'Edge:';
+    row.appendChild(label1);
     
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.placeholder = '如: Profile 1';
-    input.value = edgeProfile;
-    input.dataset.accountName = name;
-    input.style.cssText = 'width:140px;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);';
-    row.appendChild(input);
+    var edgeInput = document.createElement('input');
+    edgeInput.type = 'text';
+    edgeInput.placeholder = 'Profile 1';
+    edgeInput.value = edgeProfile;
+    edgeInput.style.cssText = 'width:100px;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);';
+    row.appendChild(edgeInput);
+    
+    // MCP Token输入框
+    var label2 = document.createElement('span');
+    label2.style.cssText = 'font-size:12px;color:var(--text-secondary);margin-left:4px;';
+    label2.textContent = 'MCP Token:';
+    row.appendChild(label2);
+    
+    var mcpInput = document.createElement('input');
+    mcpInput.type = 'password';
+    mcpInput.placeholder = '个人账号填';
+    mcpInput.value = mcpToken;
+    mcpInput.style.cssText = 'width:160px;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);';
+    row.appendChild(mcpInput);
     
     // 保存按钮
     var saveBtn = document.createElement('button');
@@ -1577,8 +1590,15 @@ async function renderAccounts() {
       var origText = btnEl.textContent;
       btnEl.textContent = '...';
       btnEl.disabled = true;
-      apiPost('/api/account/update_edge_profile', { name: name, edge_profile: input.value.trim() }).then(function() {
-        showToast('Edge配置已保存', 'success');
+      var edgeVal = edgeInput.value.trim();
+      var mcpVal = mcpInput.value.trim();
+      var promises = [];
+      promises.push(apiPost('/api/account/update_edge_profile', { name: name, edge_profile: edgeVal }));
+      if (mcpVal !== mcpToken) {
+        promises.push(apiPost('/api/account/update_mcp_token', { name: name, mcp_token: mcpVal }));
+      }
+      Promise.all(promises).then(function() {
+        showToast('配置已保存', 'success');
         btnEl.textContent = origText;
         btnEl.disabled = false;
         renderAccounts();
@@ -1601,6 +1621,15 @@ async function renderAccounts() {
       goBtn.style.cursor = 'not-allowed';
     }
     row.appendChild(goBtn);
+    
+    // 同步状态标识
+    if (mcpToken) {
+      var mcpTag = document.createElement('span');
+      mcpTag.style.cssText = 'font-size:10px;padding:2px 6px;background:rgba(99,102,241,0.1);color:#6366f1;border-radius:3px;';
+      mcpTag.textContent = 'MCP';
+      mcpTag.title = '该账号通过 MCP Token 同步会议数据';
+      row.appendChild(mcpTag);
+    }
     
     // 删除按钮
     var delBtn = document.createElement('button');

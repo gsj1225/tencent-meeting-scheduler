@@ -178,6 +178,133 @@ def _safe_nonnegative_int(value):
     except (TypeError, ValueError):
         return 0
 
+# ========== 腾讯会议 MCP 接口（个人账号） ==========
+MCP_BASE_URL = "https://mcp.meeting.tencent.com/mcp/wemeet-open/v1"
+MCP_SKILL_VERSION = "v1.0.13"
+
+def _mcp_request(token, method, params=None):
+    """发送 MCP JSON-RPC 请求"""
+    import urllib.request, urllib.error
+    body = {
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params or {},
+        "id": 1
+    }
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        MCP_BASE_URL,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "X-Tencent-Meeting-Token": token,
+            "X-Skill-Version": MCP_SKILL_VERSION,
+        },
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8")
+        raise RuntimeError(f"MCP请求失败(HTTP {e.code}): {err_body}")
+    except Exception as e:
+        raise RuntimeError(f"MCP请求异常: {str(e)}")
+
+def _mcp_call_tool(token, tool_name, arguments=None):
+    """调用 MCP 工具"""
+    params = {
+        "name": tool_name,
+        "arguments": arguments or {}
+    }
+    result = _mcp_request(token, "tools/call", params)
+    # 解析 JSON-RPC 响应
+    if "error" in result:
+        err = result["error"]
+        raise RuntimeError(err.get("message", json.dumps(err, ensure_ascii=False)))
+    if "result" not in result:
+        return result
+    inner = result["result"]
+    if "error" in inner:
+        err = inner["error"]
+        raise RuntimeError(err.get("message", json.dumps(err, ensure_ascii=False)))
+    if "content" not in inner:
+        return inner
+    # MCP 返回 content 数组，取 type=text 的项
+    for item in inner["content"]:
+        if item.get("type") == "text":
+            raw_text = item.get("text", "")
+            try:
+                parsed = json.loads(raw_text)
+            except json.JSONDecodeError:
+                return {"raw": raw_text}
+            # parsed 结构: {"status_code":200, "headers":{...}, "body":"...JSON string..."}
+            # 需要再解析 body 层
+            if isinstance(parsed, dict) and "body" in parsed:
+                body_str = parsed["body"]
+                if isinstance(body_str, str):
+                    try:
+                        return json.loads(body_str)
+                    except json.JSONDecodeError:
+                        return parsed
+            return parsed
+    return inner
+
+def _mcp_fetch_user_meetings(token, start_time_iso, end_time_iso):
+    """通过 MCP 拉取个人账号的会议列表（已结束 + 即将开始/进行中）"""
+    meetings = []
+    
+    # 1. 查已结束的会议（最近30天）
+    try:
+        result = _mcp_call_tool(token, "get_user_ended_meetings", {
+            "start_time": start_time_iso,
+            "end_time": end_time_iso,
+        })
+        meeting_list = result.get("meeting_info_list", result.get("meeting_list", result.get("meetings", [])))
+        for m in meeting_list:
+            start_ts = _iso_to_timestamp(m.get("start_time", ""))
+            end_ts = _iso_to_timestamp(m.get("end_time", ""))
+            meetings.append({
+                "account_name": "",
+                "subject": m.get("subject", ""),
+                "meeting_code": m.get("meeting_code", ""),
+                "start_time": start_ts,
+                "end_time": end_ts,
+            })
+    except Exception as e:
+        raise RuntimeError(f"查询已结束会议失败: {str(e)}")
+    
+    # 2. 查即将开始/进行中的会议
+    try:
+        result2 = _mcp_call_tool(token, "get_user_meetings", {})
+        meeting_list2 = result2.get("meeting_info_list", result2.get("meeting_list", result2.get("meetings", [])))
+        for m in meeting_list2:
+            start_ts = _iso_to_timestamp(m.get("start_time", ""))
+            end_ts = _iso_to_timestamp(m.get("end_time", ""))
+            meetings.append({
+                "account_name": "",
+                "subject": m.get("subject", ""),
+                "meeting_code": m.get("meeting_code", ""),
+                "start_time": start_ts,
+                "end_time": end_ts,
+            })
+    except Exception as e:
+        raise RuntimeError(f"查询即将开始会议失败: {str(e)}")
+    
+    return meetings
+
+def _iso_to_timestamp(iso_str):
+    """将 ISO 8601 时间字符串转换为 Unix 时间戳"""
+    if not iso_str or not isinstance(iso_str, str):
+        return 0
+    from datetime import datetime, timezone, timedelta
+    # 支持 2026-08-03T19:25:00+08:00 格式
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        return int(dt.timestamp())
+    except (ValueError, TypeError):
+        return 0
+
 def _select_longest_recording(record_meetings):
     """从多条会议录制中选择时长最长的文件。"""
     candidates = []
@@ -235,13 +362,19 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
-        edge_profile TEXT DEFAULT ''
+        edge_profile TEXT DEFAULT '',
+        mcp_token TEXT DEFAULT ''
     )''')
     # 兼容旧表：如果没有edge_profile列则添加
     try:
         c.execute('SELECT edge_profile FROM accounts LIMIT 1')
     except:
         c.execute("ALTER TABLE accounts ADD COLUMN edge_profile TEXT DEFAULT ''")
+    # 兼容旧表：如果没有mcp_token列则添加
+    try:
+        c.execute('SELECT mcp_token FROM accounts LIMIT 1')
+    except:
+        c.execute("ALTER TABLE accounts ADD COLUMN mcp_token TEXT DEFAULT ''")
     c.execute('''CREATE TABLE IF NOT EXISTS schedules (
         id TEXT PRIMARY KEY,
         account TEXT NOT NULL,
@@ -259,8 +392,8 @@ def init_db():
 def get_all_data():
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT name, edge_profile FROM accounts ORDER BY id')
-    accounts = [{'name': row['name'], 'edge_profile': row['edge_profile'] or ''} for row in c.fetchall()]
+    c.execute('SELECT name, edge_profile, mcp_token FROM accounts ORDER BY id')
+    accounts = [{'name': row['name'], 'edge_profile': row['edge_profile'] or '', 'mcp_token': row['mcp_token'] or ''} for row in c.fetchall()]
     c.execute('SELECT id, account, date, start_time as startTime, end_time as endTime, student, course, meeting_id as meetingId FROM schedules ORDER BY date DESC, start_time ASC')
     schedules = [dict(row) for row in c.fetchall()]
     conn.close()
@@ -556,6 +689,8 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
             self.handle_remove_account(body)
         elif path == '/api/account/update_edge_profile':
             self.handle_update_edge_profile(body)
+        elif path == '/api/account/update_mcp_token':
+            self.handle_update_mcp_token(body)
         elif path == '/api/edge/open-meeting':
             self.handle_open_edge_meeting(body)
         elif path == '/api/schedule/update':
@@ -760,15 +895,62 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
                         preview += f'；另有 {len(fetch_errors) - 3} 个账号失败'
                     raise RuntimeError(preview)
                 
+                # ========== MCP 个人账号同步 ==========
+                # 从数据库读取有 mcp_token 的账号
                 conn = get_db()
-                sync_counts = _upsert_synced_meetings(conn, all_meetings)
+                c = conn.cursor()
+                c.execute('SELECT name, mcp_token FROM accounts WHERE mcp_token IS NOT NULL AND mcp_token != ""')
+                mcp_accounts = [(row['name'], row['mcp_token']) for row in c.fetchall()]
+                conn.close()
+                
+                mcp_meetings = []
+                mcp_errors = []
+                if mcp_accounts:
+                    from datetime import datetime, timedelta, timezone
+                    now_dt = datetime.now(timezone(timedelta(hours=8)))
+                    start_dt = now_dt - timedelta(days=30)
+                    start_iso = start_dt.strftime('%Y-%m-%dT00:00:00+08:00')
+                    end_iso = now_dt.strftime('%Y-%m-%dT23:59:59+08:00')
+                    
+                    for acc_name, token in mcp_accounts:
+                        try:
+                            meetings = _mcp_fetch_user_meetings(token, start_iso, end_iso)
+                            for m in meetings:
+                                m["account_name"] = acc_name
+                                mcp_meetings.append(m)
+                            time.sleep(1)  # 每个账号间隔1秒，避免高频请求
+                        except Exception as mcp_err:
+                            mcp_errors.append(f'{acc_name}: {str(mcp_err)}')
+                    
+                    if mcp_meetings:
+                        conn = get_db()
+                        mcp_counts = _upsert_synced_meetings(conn, mcp_meetings)
+                        conn.commit()
+                        conn.close()
+                    else:
+                        mcp_counts = {'new_meetings': 0, 'deleted_meetings': 0}
+                else:
+                    mcp_counts = {'new_meetings': 0, 'deleted_meetings': 0}
+                
+                # 合并结果
+                conn = get_db()
+                sync_counts = _upsert_synced_meetings(conn, all_meetings + mcp_meetings)
                 conn.commit()
                 conn.close()
+                
+                # 合并错误信息
+                all_errors = fetch_errors + mcp_errors
                 result = {
                     'success': True,
                     **sync_counts,
-                    'total': len(all_meetings),
+                    'total': len(all_meetings) + len(mcp_meetings),
+                    'mcp_total': len(mcp_meetings),
+                    'mcp_accounts': len(mcp_accounts),
                 }
+                if all_errors:
+                    result['warnings'] = all_errors[:5]
+                    if len(all_errors) > 5:
+                        result['warnings'].append(f'...另有 {len(all_errors) - 5} 个错误')
                 self._last_sync_time = time.time()
                 self._last_sync_result = result
                 self.send_json(result)
@@ -1043,6 +1225,20 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
         conn = get_db()
         c = conn.cursor()
         c.execute('UPDATE accounts SET edge_profile=? WHERE name=?', (edge_profile, name))
+        conn.commit()
+        conn.close()
+        self.send_json({'success': True})
+
+    def handle_update_mcp_token(self, body):
+        name = body.get('name', '')
+        mcp_token = body.get('mcp_token', '')
+        if not name:
+            self.send_error_json('请提供账号名称')
+            return
+        
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('UPDATE accounts SET mcp_token=? WHERE name=?', (mcp_token, name))
         conn.commit()
         conn.close()
         self.send_json({'success': True})

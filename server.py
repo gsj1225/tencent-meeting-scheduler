@@ -1038,6 +1038,28 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
                     except Exception:
                         pass
             
+            # 如果企业API没查到，尝试用MCP Token查个人账号
+            if not all_records:
+                conn = get_db()
+                c = conn.cursor()
+                c.execute('SELECT name, mcp_token FROM accounts WHERE mcp_token IS NOT NULL AND mcp_token != ""')
+                mcp_accounts = [(row['name'], row['mcp_token']) for row in c.fetchall()]
+                conn.close()
+                
+                for acc_name, mcp_token in mcp_accounts:
+                    try:
+                        mcp_result = _mcp_call_tool(mcp_token, "search_records", {
+                            "meeting_code": meeting_code_clean
+                        })
+                        mcp_records = mcp_result.get("record_meetings", mcp_result.get("records", []))
+                        for record in mcp_records:
+                            returned_code = str(record.get("meeting_code", "") or "").replace("-", "").replace(" ", "")
+                            if returned_code == meeting_code_clean:
+                                record["_mcp_account"] = acc_name
+                                all_records.append(record)
+                    except Exception:
+                        pass
+            
             if not all_records:
                 self.send_json({'error': '未找到该会议号的录制，可能未开启云录制或会议号有误'})
                 return

@@ -518,6 +518,10 @@ def _upsert_synced_meetings(conn, all_meetings):
 
 # ========== API Handler ==========
 class ScheduleHandler(SimpleHTTPRequestHandler):
+    # MCP 录制列表缓存（按账号缓存，5分钟）
+    _mcp_records_cache = {}
+    _mcp_records_cache_lock = threading.Lock()
+    _MCP_RECORDS_CACHE_SECONDS = 300
     
     def log_message(self, format, *args):
         print('%s - %s' % (self.address_string(), format % args))
@@ -912,15 +916,28 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
                     start_iso = start_dt.strftime('%Y-%m-%dT00:00:00+08:00')
                     end_iso = now_dt.strftime('%Y-%m-%dT23:59:59+08:00')
                     
-                    for acc_name, token in mcp_accounts:
+                    # 并发查询所有MCP账号，避免串行拖慢同步
+                    def _sync_one_mcp(acc_name, token):
                         try:
                             meetings = _mcp_fetch_user_meetings(token, start_iso, end_iso)
                             for m in meetings:
                                 m["account_name"] = acc_name
-                                mcp_meetings.append(m)
-                            time.sleep(1)  # 每个账号间隔1秒，避免高频请求
+                            return meetings
                         except Exception as mcp_err:
-                            mcp_errors.append(f'{acc_name}: {str(mcp_err)}')
+                            return {"__error__": f'{acc_name}: {str(mcp_err)}'}
+                    
+                    mcp_result_list = []
+                    with ThreadPoolExecutor(max_workers=min(8, len(mcp_accounts))) as ex:
+                        futures = {ex.submit(_sync_one_mcp, n, t): n for n, t in mcp_accounts}
+                        for fut in as_completed(futures):
+                            res = fut.result()
+                            mcp_result_list.append(res)
+                    
+                    for res in mcp_result_list:
+                        if isinstance(res, dict) and res.get("__error__"):
+                            mcp_errors.append(res["__error__"])
+                        elif isinstance(res, list):
+                            mcp_meetings.extend(res)
                     
                     if mcp_meetings:
                         conn = get_db()
@@ -988,6 +1005,92 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             self.send_error_json(f'创建会议异常: {str(e)}')
 
+    def _mcp_get_records_cached(self, mcp_token, start_iso, end_iso):
+        """查询某MCP账号最近30天录制列表，带5分钟缓存"""
+        cache_key = (mcp_token, start_iso, end_iso)
+        now = time.time()
+        with self._mcp_records_cache_lock:
+            cached = self._mcp_records_cache.get(cache_key)
+            if cached and (now - cached[0]) < self._MCP_RECORDS_CACHE_SECONDS:
+                return cached[1]
+        
+        # 查腾讯会议（分页查完）
+        mcp_result = _mcp_call_tool(mcp_token, "get_records_list", {
+            "start_time": start_iso,
+            "end_time": end_iso,
+        })
+        mcp_meetings = mcp_result.get("record_meetings", []) or []
+        while mcp_result.get("has_more"):
+            mcp_result = _mcp_call_tool(mcp_token, "get_records_list", {
+                "start_time": start_iso,
+                "end_time": end_iso,
+                "page_token": mcp_result.get("next_page_token", ""),
+            })
+            mcp_meetings.extend(mcp_result.get("record_meetings", []) or [])
+        
+        with self._mcp_records_cache_lock:
+            self._mcp_records_cache[cache_key] = (time.time(), mcp_meetings)
+        return mcp_meetings
+
+    def _mcp_query_records_for_code(self, mcp_token, meeting_code_clean):
+        """查询某MCP账号中匹配会议号的录制，返回 meeting_wrap 列表（含record_files转换）"""
+        from datetime import datetime, timedelta, timezone
+        now_dt = datetime.now(timezone(timedelta(hours=8)))
+        start_iso = (now_dt - timedelta(days=30)).strftime('%Y-%m-%dT00:00:00+08:00')
+        end_iso = now_dt.strftime('%Y-%m-%dT23:59:59+08:00')
+        
+        mcp_meetings = self._mcp_get_records_cached(mcp_token, start_iso, end_iso)
+        wraps = []
+        for record_meeting in mcp_meetings:
+            returned_code = str(record_meeting.get("meeting_code", "") or "").replace("-", "").replace(" ", "")
+            if returned_code != meeting_code_clean:
+                continue
+            meeting_record_id = str(record_meeting.get("meeting_record_id", ""))
+            record_files = []
+            for rf in record_meeting.get("record_files", []) or []:
+                start_ms = _iso_to_timestamp(rf.get("record_start_time", "")) * 1000
+                end_ms = _iso_to_timestamp(rf.get("record_end_time", "")) * 1000
+                record_files.append({
+                    "record_file_id": rf.get("record_file_id", ""),
+                    "record_start_time": start_ms,
+                    "record_end_time": end_ms,
+                    "record_size": 0,
+                    "sharing_url": "",
+                })
+            wraps.append({
+                "subject": record_meeting.get("subject", ""),
+                "meeting_code": record_meeting.get("meeting_code", ""),
+                "meeting_id": record_meeting.get("meeting_id", ""),
+                "record_files": record_files,
+                "_mcp_token": mcp_token,
+                "_mcp_meeting_record_id": meeting_record_id,
+            })
+        return wraps
+
+    def _mcp_query_all_accounts(self, meeting_code_clean):
+        """并发查询所有MCP账号中匹配会议号的录制"""
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT name, mcp_token FROM accounts WHERE mcp_token IS NOT NULL AND mcp_token != ""')
+        mcp_accounts = [(row['name'], row['mcp_token']) for row in c.fetchall()]
+        conn.close()
+        
+        if not mcp_accounts:
+            return []
+        
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        result = []
+        with ThreadPoolExecutor(max_workers=min(8, len(mcp_accounts))) as executor:
+            futures = {executor.submit(self._mcp_query_records_for_code, t, meeting_code_clean): n for n, t in mcp_accounts}
+            for f in as_completed(futures):
+                try:
+                    wraps = f.result()
+                    if wraps:
+                        result.extend(wraps)
+                except Exception:
+                    pass
+        return result
+
     def handle_query_playback(self, body):
         """根据会议号查询会议录制回放信息"""
         meeting_code = body.get('meetingCode', '').strip()
@@ -1038,66 +1141,9 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
                     except Exception:
                         pass
             
-            # 如果企业API没查到，尝试用MCP Token查个人账号
-            if not all_records:
-                conn = get_db()
-                c = conn.cursor()
-                c.execute('SELECT name, mcp_token FROM accounts WHERE mcp_token IS NOT NULL AND mcp_token != ""')
-                mcp_accounts = [(row['name'], row['mcp_token']) for row in c.fetchall()]
-                conn.close()
-                
-                from datetime import datetime, timedelta, timezone
-                now_dt = datetime.now(timezone(timedelta(hours=8)))
-                start_iso = (now_dt - timedelta(days=30)).strftime('%Y-%m-%dT00:00:00+08:00')
-                end_iso = now_dt.strftime('%Y-%m-%dT23:59:59+08:00')
-                
-                for acc_name, mcp_token in mcp_accounts:
-                    try:
-                        # 用 get_records_list 查最近30天录制，按会议号过滤
-                        mcp_result = _mcp_call_tool(mcp_token, "get_records_list", {
-                            "start_time": start_iso,
-                            "end_time": end_iso,
-                        })
-                        mcp_meetings = mcp_result.get("record_meetings", [])
-                        # 分页查完
-                        while mcp_result.get("has_more"):
-                            mcp_result = _mcp_call_tool(mcp_token, "get_records_list", {
-                                "start_time": start_iso,
-                                "end_time": end_iso,
-                                "page_token": mcp_result.get("next_page_token", ""),
-                            })
-                            mcp_meetings.extend(mcp_result.get("record_meetings", []))
-                        
-                        for record_meeting in mcp_meetings:
-                            returned_code = str(record_meeting.get("meeting_code", "") or "").replace("-", "").replace(" ", "")
-                            if returned_code != meeting_code_clean:
-                                continue
-                            
-                            # MCP 时间是 ISO 8601，转毫秒时间戳
-                            meeting_record_id = str(record_meeting.get("meeting_record_id", ""))
-                            record_files = []
-                            for rf in record_meeting.get("record_files", []) or []:
-                                start_ms = _iso_to_timestamp(rf.get("record_start_time", "")) * 1000
-                                end_ms = _iso_to_timestamp(rf.get("record_end_time", "")) * 1000
-                                record_files.append({
-                                    "record_file_id": rf.get("record_file_id", ""),
-                                    "record_start_time": start_ms,
-                                    "record_end_time": end_ms,
-                                    "record_size": 0,
-                                    "sharing_url": "",
-                                })
-                            
-                            meeting_wrap = {
-                                "subject": record_meeting.get("subject", ""),
-                                "meeting_code": record_meeting.get("meeting_code", ""),
-                                "meeting_id": record_meeting.get("meeting_id", ""),
-                                "record_files": record_files,
-                                "_mcp_token": mcp_token,
-                                "_mcp_meeting_record_id": meeting_record_id,
-                            }
-                            all_records.append(meeting_wrap)
-                    except Exception:
-                        pass
+            # 并发查询所有MCP账号（带缓存），再合并企业API结果
+            mcp_all = self._mcp_query_all_accounts(meeting_code_clean)
+            all_records.extend(mcp_all)
             
             if not all_records:
                 self.send_json({'error': '未找到该会议号的录制，可能未开启云录制或会议号有误'})
@@ -1122,6 +1168,7 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
                     record_time = str(media_start)
             
             playback_url = selected["sharing_url"]
+            
             # 如果是MCP账号且没有sharing_url，通过 get_record_addresses 获取
             if not playback_url and found_record.get("_mcp_token"):
                 try:
@@ -1130,9 +1177,44 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
                     })
                     addr_list = addr_result.get("record_addresses", addr_result.get("addresses", []))
                     if addr_list:
-                        playback_url = addr_list[0].get("sharing_url", addr_list[0].get("download_url", ""))
+                        playback_url = addr_list[0].get("view_address", addr_list[0].get("sharing_url", addr_list[0].get("download_url", "")))
                 except Exception:
                     pass
+            
+            # 如果企业账号查到录制但没有sharing_url，尝试从MCP个人账号查
+            if not playback_url and not found_record.get("_mcp_token"):
+                # 从已有的MCP结果中查找
+                mcp_selected = None
+                for rec in all_records:
+                    if rec.get("_mcp_token"):
+                        for rf in rec.get("record_files", []) or []:
+                            dur = max(0, _safe_nonnegative_int(rf.get("record_end_time")) - _safe_nonnegative_int(rf.get("record_start_time")))
+                            if not mcp_selected or dur > mcp_selected["duration_ms"]:
+                                mcp_selected = {"meeting": rec, "file": rf, "duration_ms": dur}
+                
+                
+                if mcp_selected:
+                    mcp_meeting = mcp_selected["meeting"]
+                    try:
+                        addr_result = _mcp_call_tool(mcp_meeting["_mcp_token"], "get_record_addresses", {
+                            "meeting_record_id": mcp_meeting.get("_mcp_meeting_record_id", ""),
+                        })
+                        addr_list = addr_result.get("record_files", addr_result.get("record_addresses", []))
+                        if addr_list:
+                            playback_url = addr_list[0].get("view_address", addr_list[0].get("sharing_url", addr_list[0].get("download_url", "")))
+                            # 更新展示信息为MCP的
+                            subject = mcp_meeting.get("subject", subject)
+                            media_start = mcp_selected["file"].get("record_start_time", 0)
+                            if media_start:
+                                try:
+                                    from datetime import datetime
+                                    rt = datetime.fromtimestamp(int(media_start) / 1000)
+                                    record_time = rt.strftime('%Y-%m-%d %H:%M:%S')
+                                except:
+                                    record_time = str(media_start)
+                            selected["duration_ms"] = mcp_selected["duration_ms"]
+                    except Exception:
+                        pass
             
             if not playback_url:
                 self.send_json({'error': '已找到最长的录制文件，但该文件尚未开启共享，请在腾讯会议中开启共享后重试'})

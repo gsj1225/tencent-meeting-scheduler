@@ -1158,7 +1158,8 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
                     addr_result = _mcp_call_tool(found_record["_mcp_token"], "get_record_addresses", {
                         "meeting_record_id": found_record.get("_mcp_meeting_record_id", ""),
                     })
-                    addr_list = addr_result.get("record_addresses", addr_result.get("addresses", []))
+                    # MCP 返回结构是 record_files 数组
+                    addr_list = addr_result.get("record_files", addr_result.get("record_addresses", addr_result.get("addresses", [])))
                     if addr_list:
                         playback_url = addr_list[0].get("view_address", addr_list[0].get("sharing_url", addr_list[0].get("download_url", "")))
                 except Exception:

@@ -938,18 +938,8 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
                             mcp_errors.append(res["__error__"])
                         elif isinstance(res, list):
                             mcp_meetings.extend(res)
-                    
-                    if mcp_meetings:
-                        conn = get_db()
-                        mcp_counts = _upsert_synced_meetings(conn, mcp_meetings)
-                        conn.commit()
-                        conn.close()
-                    else:
-                        mcp_counts = {'new_meetings': 0, 'deleted_meetings': 0}
-                else:
-                    mcp_counts = {'new_meetings': 0, 'deleted_meetings': 0}
                 
-                # 合并结果
+                # 一次性合并写入：remote_codes 包含企业和MCP所有会议号，避免误删
                 conn = get_db()
                 sync_counts = _upsert_synced_meetings(conn, all_meetings + mcp_meetings)
                 conn.commit()

@@ -1005,66 +1005,59 @@ class ScheduleHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             self.send_error_json(f'创建会议异常: {str(e)}')
 
-    def _mcp_get_records_cached(self, mcp_token, start_iso, end_iso):
-        """查询某MCP账号最近30天录制列表，带5分钟缓存"""
-        cache_key = (mcp_token, start_iso, end_iso)
+    def _mcp_query_records_for_code(self, mcp_token, meeting_code_clean):
+        """按会议号精确查询某MCP账号的录制，带5分钟缓存（无需拉取全部录制，速度快）"""
+        cache_key = (mcp_token, meeting_code_clean)
         now = time.time()
         with self._mcp_records_cache_lock:
             cached = self._mcp_records_cache.get(cache_key)
             if cached and (now - cached[0]) < self._MCP_RECORDS_CACHE_SECONDS:
                 return cached[1]
         
-        # 查腾讯会议（分页查完）
-        mcp_result = _mcp_call_tool(mcp_token, "get_records_list", {
-            "start_time": start_iso,
-            "end_time": end_iso,
-        })
-        mcp_meetings = mcp_result.get("record_meetings", []) or []
-        while mcp_result.get("has_more"):
+        wraps = []
+        try:
+            # 直接按 meeting_code 查询，MCP 返回精确匹配的录制
             mcp_result = _mcp_call_tool(mcp_token, "get_records_list", {
-                "start_time": start_iso,
-                "end_time": end_iso,
-                "page_token": mcp_result.get("next_page_token", ""),
+                "meeting_code": meeting_code_clean,
             })
-            mcp_meetings.extend(mcp_result.get("record_meetings", []) or [])
+            mcp_meetings = mcp_result.get("record_meetings", []) or []
+            # 分页查完
+            while mcp_result.get("has_more"):
+                mcp_result = _mcp_call_tool(mcp_token, "get_records_list", {
+                    "meeting_code": meeting_code_clean,
+                    "page_token": mcp_result.get("next_page_token", ""),
+                })
+                mcp_meetings.extend(mcp_result.get("record_meetings", []) or [])
+            
+            for record_meeting in mcp_meetings:
+                returned_code = str(record_meeting.get("meeting_code", "") or "").replace("-", "").replace(" ", "")
+                if returned_code != meeting_code_clean:
+                    continue
+                meeting_record_id = str(record_meeting.get("meeting_record_id", ""))
+                record_files = []
+                for rf in record_meeting.get("record_files", []) or []:
+                    start_ms = _iso_to_timestamp(rf.get("record_start_time", "")) * 1000
+                    end_ms = _iso_to_timestamp(rf.get("record_end_time", "")) * 1000
+                    record_files.append({
+                        "record_file_id": rf.get("record_file_id", ""),
+                        "record_start_time": start_ms,
+                        "record_end_time": end_ms,
+                        "record_size": 0,
+                        "sharing_url": "",
+                    })
+                wraps.append({
+                    "subject": record_meeting.get("subject", ""),
+                    "meeting_code": record_meeting.get("meeting_code", ""),
+                    "meeting_id": record_meeting.get("meeting_id", ""),
+                    "record_files": record_files,
+                    "_mcp_token": mcp_token,
+                    "_mcp_meeting_record_id": meeting_record_id,
+                })
+        except Exception:
+            pass
         
         with self._mcp_records_cache_lock:
-            self._mcp_records_cache[cache_key] = (time.time(), mcp_meetings)
-        return mcp_meetings
-
-    def _mcp_query_records_for_code(self, mcp_token, meeting_code_clean):
-        """查询某MCP账号中匹配会议号的录制，返回 meeting_wrap 列表（含record_files转换）"""
-        from datetime import datetime, timedelta, timezone
-        now_dt = datetime.now(timezone(timedelta(hours=8)))
-        start_iso = (now_dt - timedelta(days=30)).strftime('%Y-%m-%dT00:00:00+08:00')
-        end_iso = now_dt.strftime('%Y-%m-%dT23:59:59+08:00')
-        
-        mcp_meetings = self._mcp_get_records_cached(mcp_token, start_iso, end_iso)
-        wraps = []
-        for record_meeting in mcp_meetings:
-            returned_code = str(record_meeting.get("meeting_code", "") or "").replace("-", "").replace(" ", "")
-            if returned_code != meeting_code_clean:
-                continue
-            meeting_record_id = str(record_meeting.get("meeting_record_id", ""))
-            record_files = []
-            for rf in record_meeting.get("record_files", []) or []:
-                start_ms = _iso_to_timestamp(rf.get("record_start_time", "")) * 1000
-                end_ms = _iso_to_timestamp(rf.get("record_end_time", "")) * 1000
-                record_files.append({
-                    "record_file_id": rf.get("record_file_id", ""),
-                    "record_start_time": start_ms,
-                    "record_end_time": end_ms,
-                    "record_size": 0,
-                    "sharing_url": "",
-                })
-            wraps.append({
-                "subject": record_meeting.get("subject", ""),
-                "meeting_code": record_meeting.get("meeting_code", ""),
-                "meeting_id": record_meeting.get("meeting_id", ""),
-                "record_files": record_files,
-                "_mcp_token": mcp_token,
-                "_mcp_meeting_record_id": meeting_record_id,
-            })
+            self._mcp_records_cache[cache_key] = (time.time(), wraps)
         return wraps
 
     def _mcp_query_all_accounts(self, meeting_code_clean):

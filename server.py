@@ -234,19 +234,38 @@ def _mcp_call_tool(token, tool_name, arguments=None):
     for item in inner["content"]:
         if item.get("type") == "text":
             raw_text = item.get("text", "")
+            # MCP 返回结构可能是：
+            # 旧格式：content.text -> {"status_code": 200, "body": "..."}
+            # 新格式：content.text -> {"data": {"status_code": 200, "body": "..."}}
+            # 逐层解开 data/body，兼容腾讯会议接口的包装层变化。
             try:
                 parsed = json.loads(raw_text)
             except json.JSONDecodeError:
                 return {"raw": raw_text}
-            # parsed 结构: {"status_code":200, "headers":{...}, "body":"...JSON string..."}
-            # 需要再解析 body 层
-            if isinstance(parsed, dict) and "body" in parsed:
-                body_str = parsed["body"]
-                if isinstance(body_str, str):
+
+            for _ in range(6):
+                if isinstance(parsed, str):
                     try:
-                        return json.loads(body_str)
+                        parsed = json.loads(parsed)
                     except json.JSONDecodeError:
-                        return parsed
+                        break
+                    continue
+                if not isinstance(parsed, dict):
+                    break
+
+                if "body" in parsed:
+                    parsed = parsed["body"]
+                    continue
+                if "data" in parsed and isinstance(parsed["data"], dict):
+                    parsed = parsed["data"]
+                    continue
+                break
+
+            if isinstance(parsed, str):
+                try:
+                    return json.loads(parsed)
+                except json.JSONDecodeError:
+                    return {"raw": parsed}
             return parsed
     return inner
 
